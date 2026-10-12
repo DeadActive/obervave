@@ -32,8 +32,8 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 - MIDI CC: 74 cutoff, 71 reso, 73 amp attack, 72 amp release, 5 glide, 1 mod depth (the wheel and the knob are one
   value), 7 volume, 64 sustain, 120/123 all off; every other parameter from CC 20 up in table order, skipping 64
   (`cc_map_init`). Program change picks the program.
-- The video: `../video/obervave/song.py` (nine OberVaves from the host build, A minor 108 BPM, 32 bars; stems/,
-  f/<part>/ frames + logs, track.wav) and `../video/make_obervave.py` -> `../video/obervave-1.0.mp4`.
+- The video: `video/song.py` (nine OberVaves from the host build, A minor 108 BPM, 32 bars; stems/, f/<part>/
+  frames + logs, track.wav) and `video/make_video.py` -> `video/obervave-1.0.mp4`. The renders are git-ignored.
 - `tools/build.py`: `./build.sh [--release X.Y]` -> `build/obervave[-X.Y].fwsc`, identity FM-1_95Y.
 - Docs from Dinghy: docs/API.md (platform calls), docs/RULES.md (the chip), docs/MAKE-IT-YOURS.md.
 - Workspace file: `../obervave.code-workspace` (opened in VSCodium Insiders, flatpak).
