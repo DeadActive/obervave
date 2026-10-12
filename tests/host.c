@@ -35,9 +35,10 @@ static struct { uint32_t notes, buttons; } fm1_in;
 static uint32_t host_edges;
 static uint32_t fm1_input_edges(uint32_t *released) { uint32_t b = host_edges; host_edges = 0; *released = 0; return b; }
 static uint32_t fm1_input_note_edges(void) { return 0; }   /* (the script sets fm1_in.notes) */
-static int32_t host_enc[7];
+static int32_t host_enc[7], host_enc_pos[7];    /* detents owed to the app; the position so far (the film's log) */
 static int32_t fm1_enc_take(uint32_t e) { int32_t v = host_enc[e % 7u]; host_enc[e % 7u] = 0; return v; }
-static void fm1_led_key(uint32_t id, int on) { (void)id; (void)on; }
+static uint64_t host_leds;                      /* bit id: LED id lit (0..13 buttons, 14..40 keys) */
+static void fm1_led_key(uint32_t id, int on) { if (on) host_leds |= (uint64_t)1 << id; else host_leds &= ~((uint64_t)1 << id); }
 
 /* the screen: 240 x 240 RGB565, as the ST7789 gets it (gfx.c sends the bytes swapped) */
 static uint16_t fb[240 * 240];
@@ -210,7 +211,7 @@ static void platform_poll(void)                 /* one call = one millisecond */
         } else if (script[step].btn >= 0)
             host_edges |= 1u << script[step].btn;
         else if (script[step].enc >= 0)
-            host_enc[script[step].enc % 7] += script[step].encn;
+            host_enc[script[step].enc % 7] += script[step].encn, host_enc_pos[script[step].enc % 7] += script[step].encn;
         else
             fm1_in.notes = script[step].keys;
         step++;
@@ -238,11 +239,21 @@ static void platform_poll(void)                 /* one call = one millisecond */
         }
         wav_n += HALF_FRAMES;
     }
-    if (frame_fps) {                            /* a film: a frame every 1/fps s, as the screen is then */
+    if (frame_fps) {                            /* a film: a frame every 1/fps s, as the screen is then, and a log line:
+                                                   keys held, key LEDs, button LEDs, the 7 encoder positions */
         if ((uint64_t)frame * 1000u <= (uint64_t)fm1_ms * frame_fps) {
+            static FILE *log;
             char name[512];
+            uint32_t e;
             snprintf(name, sizeof name, "%s-%05u.ppm", host_out, frame++);
             write_ppm_as(name);
+            if (!log) { snprintf(name, sizeof name, "%s-log.txt", host_out); log = fopen(name, "w"); }
+            if (log) {
+                fprintf(log, "%u %u %u %u", fm1_ms, fm1_in.notes, (uint32_t)(host_leds >> 14), (uint32_t)(host_leds & 0x3FFFu));
+                for (e = 0; e < 7u; e++) fprintf(log, " %d", host_enc_pos[e]);
+                fprintf(log, "\n");
+                fflush(log);
+            }
         }
     } else if (shot < sizeof SHOT / sizeof SHOT[0] && fm1_ms == SHOT[shot])
         write_ppm(SHOT[shot++]);

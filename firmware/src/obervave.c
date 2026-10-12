@@ -164,10 +164,19 @@ static void param_value(char *s, uint32_t p, uint32_t v)   /* <= 7 characters */
     }
 }
 
+static uint32_t cut_shown_t;                    /* the header shows the cutoff for a second after it moved */
 static void draw_header(void)
 {
     char tags[40];
     tags[0] = 0;
+    if (cut_shown_t && fm1_ms - cut_shown_t < 1000u) {
+        char v[12];
+        param_value(v, P_CUTOFF, live.v[P_CUTOFF]);
+        scat(tags, "CUTOFF ");
+        scat(tags, v);
+        ui_header(prog, live.v + NPARAM, edited, tags);
+        return;
+    }
     scat(tags, MODE_NAME[live.v[P_MODE] & 3u]);
     scat(tags, " ");
     scat(tags, FTYPE_NAME[live.v[P_FTYPE] % 5u]);
@@ -221,7 +230,7 @@ static uint32_t cycle_page(uint32_t first, uint32_t count)   /* a button steps t
 
 static void app_main(void)
 {
-    uint32_t prev = 0, k, i, dirty_hdr = 1, dirty_page = 1, dirty_tags = 1, t_led = 0, t_scope = 0, t_page = 0, leds_q = 1;
+    uint32_t prev = 0, k, i, dirty_hdr = 1, dirty_page = 1, dirty_tags = 1, t_led = 0, t_scope = 0, t_page = 0, t_hdr = 0, leds_q = 1;
     uint32_t clk_n = 0, clk_t0 = 0, clk_last = 0, leds_prev = 0xFFFFFFFFu;
     uint8_t held_key[27] = {0};
     rnd = 0xC0FFEE42u;
@@ -308,8 +317,10 @@ static void app_main(void)
         }
         if ((e = fm1_enc_take(ENC_ALGORITHM)) != 0) {
             set_param(P_CUTOFF, (int32_t)live.v[P_CUTOFF] + e * 2);
+            cut_shown_t = fm1_ms | 1u;
             dirty_hdr = dirty_page = 1;
         }
+        if (cut_shown_t && fm1_ms - cut_shown_t >= 1000u) { cut_shown_t = 0; dirty_hdr = 1; }
         if ((e = fm1_enc_take(ENC_SELECT)) != 0) {
             page = (uint32_t)((int32_t)page + e + (int32_t)NPAGE * 4) % NPAGE;
             dirty_page = 1;
@@ -360,6 +371,7 @@ static void app_main(void)
                 else if (cc_map[d1]) {
                     uint32_t p = cc_map[d1] - 1u;
                     set_param(p, PDEF[p].max == 127 ? (int32_t)d2 : ((int32_t)d2 * PDEF[p].max + 63) / 127);
+                    if (p == P_CUTOFF) cut_shown_t = fm1_ms | 1u;
                     dirty_page = dirty_hdr = 1;
                     if (p == P_MODE || p == P_FTYPE || p == P_ARP_MODE) dirty_tags = 1;
                 }
@@ -393,7 +405,7 @@ static void app_main(void)
         fm1_led_key(BTN_SAVE, save_armed);
 
         /* the screen: only what changed */
-        if (dirty_hdr) { dirty_hdr = 0; draw_header(); }
+        if (dirty_hdr && fm1_ms - t_hdr >= 30u) { dirty_hdr = 0; t_hdr = fm1_ms; draw_header(); }
         if (dirty_page && fm1_ms - t_page >= 30u) { dirty_page = 0; t_page = fm1_ms; draw_page(); }
         if (dirty_tags) { dirty_tags = 0; draw_tags(); }
         if (fm1_ms - t_led >= 40u) {
