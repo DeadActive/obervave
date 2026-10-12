@@ -1,0 +1,99 @@
+# OberVave
+
+A firmware for the M-VAVE FM-1: ONE polyphonic analog-style synth in the spirit of the classic 8-voice American
+poly synths of 1979-84 (OB-X / OB-8 era). Built on Dinghy (`../dinghy`, zvenson/dinghy, started from d44df7d).
+GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
+
+## Hard rules
+
+- Nothing from SLOOP / sloopDX / zp12 apps (no sequencer, no grooves, no other engines). Only this one synth,
+  as deep as possible. Dinghy's platform (`platform.c`, `usb.c`, `ota.c`, hal/) stays as it is.
+- No trademarks in the product: never "Oberheim", "OB-X", "OB-8" on screen, in patch names or in the release name.
+  In docs only as "inspired by"; the marks belong to their owners. No artist or song names in patch names.
+- Keep the Felucca / SLOOP / Dinghy credits (LICENSING.md, README).
+- Target: JieLi AC791N, no FPU, no libgcc: integers only, **no 64-bit division** (int64 multiply is fine),
+  no constant in 0xFFC00000-0xFFD00000 (`tools/build.py` checks). RAM <= 96 KB, big buffers in `.pool`.
+- Audio ISR: 256 frames per call at 44.1 kHz (5.8 ms). Stay under half of it. Measure on the device
+  (`fm1_ticks()` around the render, show it on the GLOBAL page).
+
+## Where things are
+
+- `firmware/src/obervave.c`: the app (still Dinghy's sine: to be replaced). Includes `platform.c` first.
+- `tests/host.c` + `tests/run_host.sh`: the same app on the PC (WAV + screen PNGs, scripted keys/buttons/MIDI).
+  Build flag `OBV_HOST`. To add: `enc ID N` script lines (encoders) so demos can turn knobs.
+- `tools/build.py`: `./build.sh [--release X.Y]` -> `build/obervave[-X.Y].fwsc`, identity FM-1_95Y.
+- Docs from Dinghy: docs/API.md (platform calls), docs/RULES.md (the chip), docs/MAKE-IT-YOURS.md.
+- Workspace file: `../obervave.code-workspace` (opened in VSCodium Insiders, flatpak).
+
+## Plan (agreed in the first session, 2026-10-12)
+
+Priorities from the user: **the audio engine first, the look second**. Max depth of the one synth.
+
+### Engine (all in the ISR, control rate CTL = 16 frames)
+
+- 8 voices. Modes: POLY (round-robin allocation over the 8 "voice cards", steal oldest released, then oldest),
+  DUAL (2 detuned voices per note, 4 notes), UNISON (2-8 voices on one note, detune spread, pan spread), MONO
+  (last-note priority, legato without retrigger). Glide in every mode (also poly).
+- Per voice: OSC1 + OSC2, each SAW / PULSE / SAW+PULSE / OFF, PW + PWM from the LFO. OSC2: semis -24..+24,
+  fine detune, HARD SYNC to OSC1, FILTER ENV -> OSC2 pitch (sync sweeps), X-MOD (OSC2 -> OSC1 linear FM, clamp
+  the step >= inc/16). Noise (per-voice xorshift). Free-running phases, random start.
+- Anti-aliasing: polyBLEP as discontinuity events with a one-sample delay, so natural wraps AND sync resets use
+  the same code: a jump of height H at fraction t (time from the event to the current sample, 0..1) adds
+  `prev += H/2 * t^2`, `cur -= H/2 * (1-t)^2`. Pulse = saw(ph) - saw(ph + pw) (two event streams, mean 0).
+  One 32-bit division per wrap (t = ph / (inc >> 15)), as sloopdx dsp.c `blep`.
+- Mixer -> DRIVE (tanh table) -> filter. Filter types: 12 dB state-variable (Simper trapezoidal, Q13 coefficients
+  per block, as sloopdx dsp.c `tsvf_*`) LP / BP / HP / NOTCH with a soft saturation on the band-pass state (warm,
+  bounded self-oscillation); 24 dB LP = two cascaded SVFs (resonance on one). Cutoff in Q8 semitones:
+  base + filter env * amount (bipolar) + key track 0..100 % + LFO + velocity + per-voice drift; a generated
+  table tan(pi f / fs) (tools/gen_tables.py -> committed header).
+- Envelopes: filter ADSR + amp ADSR, analog RC curves (attack aims at ~1.3 and stops at 1.0), per-block
+  coefficients from a time table 0.5 ms .. 10 s, amp interpolated per sample (no zipper).
+- LFO (global like the originals, phase mode SYNC / FREE / SPREAD = per-voice phase offsets): TRI, SAW, RAMP,
+  SQUARE, S&H, smooth random; rate 0.05-30 Hz, delay / fade-in per voice; amounts to pitch (OSC1 / OSC2 / both),
+  PWM, filter, amp. Mod wheel (CC1) adds to pitch and filter depth.
+- VINTAGE: per voice card fixed offsets (osc tune +-8 cents, cutoff +-1.5 semis, env times +-10 %) plus a slow
+  random walk on pitch, all scaled by the knob. SPREAD: per-voice pan (alternating L/R, the originals' pan pots),
+  equal-power gains. Output: sum -> gentle tanh "output stage". Nominal chord peak ~ -6 dBFS before MASTER.
+- Pitch: Q8 semitones -> inc via a 12-entry octave table (Dinghy's INC_C9) x a 256-entry fine table, int64
+  multiply, shift by octave. Pitch bend (range param), MIDI CC for every parameter (CC 74 cutoff, 71 reso,
+  1 mod, 64 sustain, 5 glide, 73 attack, 72 release, 7 volume, the rest from CC 20 up), sustain.
+- Arpeggiator in the ISR (sample-exact): UP, DOWN, UP/DN, RANDOM, AS PLAYED; 1-4 octaves; 1/4 .. 1/32 + triplets;
+  gate %; tempo 40-240; latch. MIDI clock if 0xF8 reaches midi_get (check usb.c).
+- Main loop -> ISR: a ring of note events {on/off, note, vel} (one writer each side); the ISR owns voices,
+  held-note list, arp, sustain. ISR -> UI: per-voice level + note (volatile), and a scope capture (armed by the
+  main loop, triggered on a rising zero crossing, stride from the last note's period).
+
+### Patches
+
+- A patch = a byte array indexed by a parameter table {label, min, max, display kind} + a 10-char name. The UI,
+  MIDI CC, randomizer and storage all walk that table.
+- 32 programs: factory set in const flash, user saves in the settings sector 0xFC000 (raise Dinghy's 256-byte
+  `settings_*` limit to the sector, one static buffer). Save only when silent (the erase stalls the audio).
+- Factory sounds to make it shine: big brass stab, poly brass swell, sync-sweep lead, unison lead, string
+  machine-ish PWM pad, bell-ish x-mod, fat bass (mono), arp sequence, sweep pad, 12 dB band-pass "quack" etc.
+
+### Controls
+
+- PRESETS = program, ALGORITHM = CUTOFF (always), SELECT = page scroll, KNOB 1-4 = the page's four parameters.
+- HOME = PERFORM (RESO, F.ENV AMT, A.RELEASE, MOD DEPTH). EDIT cycles OSC1 / OSC2 / OSC MOD / FILTER, ENV cycles
+  FILTER ENV / AMP ENV, LFO cycles LFO / LFO DEST, FX = VOICE (mode, unison detune, glide, vintage) / OUTPUT
+  (spread, vel>amp, bend, volume), ARP = arp on/off + its page, GLO = TEMPO, MIDI CH, TUNE, CPU meter.
+- PLAY = HOLD (latch / sustain), SEQ = UNISON quick toggle, REC = randomize (in useful ranges), SAVE = save
+  (twice to confirm, PRESETS picks the slot), OCT- / OCT+ = octave. Key LEDs show sounding notes, page buttons lit.
+
+### Look (240 x 240)
+
+- Own design, no copied trade dress: charcoal panel, cream legends, red LED 7-segment program number (lit and dim
+  segments, drawn with rects), "OBERVAVE" in FONT_L with 80s stripe bands (red / orange / amber) through the lower
+  half of the letters, section titles between thin rules like a silkscreen.
+- 4 anti-aliased round knobs (coverage by distance, blended RGB565) with an amber value arc and a pointer, label
+  above, value below. A scope strip (amber trace on dark brown). 8 round voice LEDs glowing with each voice's
+  amp envelope, tags for mode (POLY/DUAL/UNI/MONO), filter (12/24), ARP, HOLD.
+- Splash at boot (~1.2 s): the stripes sweep in. Redraw only what changed; scope + LEDs ~20-25 fps.
+  Raise `CV_MAX` (canvas in .pool) for bigger strips.
+
+## Style
+
+As Dinghy / SLOOP: C99, 4 spaces, short comments that say why, unity build. Commit messages: one line what changed.
+Commit after each tested step. Host test before every device build: listen to / look at `build/host/*`.
+Not on GitHub yet: ask the user before creating the public repo.
