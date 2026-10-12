@@ -29,7 +29,8 @@ static struct { uint32_t notes, buttons; } fm1_in;
 static uint32_t host_edges;
 static uint32_t fm1_input_edges(uint32_t *released) { uint32_t b = host_edges; host_edges = 0; *released = 0; return b; }
 static uint32_t fm1_input_note_edges(void) { return 0; }   /* (the script sets fm1_in.notes) */
-static int32_t fm1_enc_take(uint32_t e) { (void)e; return 0; }
+static int32_t host_enc[7];
+static int32_t fm1_enc_take(uint32_t e) { int32_t v = host_enc[e % 7u]; host_enc[e % 7u] = 0; return v; }
 static void fm1_led_key(uint32_t id, int on) { (void)id; (void)on; }
 
 /* the screen: 240 x 240 RGB565, as the ST7789 gets it (gfx.c sends the bytes swapped) */
@@ -55,10 +56,11 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
 #define CV_MAX (240u * 64u)
 #include "gfx.c"
 
-static uint8_t host_store[256 + 4];
+#define SETTINGS_MAX (4096u - 12u)
+static uint8_t host_store[SETTINGS_MAX + 4];
 static int settings_load(void *p, uint32_t n)
 {
-    if (host_store[0] != 1 || n > 256u) return -1;
+    if (host_store[0] != 1 || n > SETTINGS_MAX) return -1;
     memcpy(p, host_store + 4, n);
     return 0;
 }
@@ -85,17 +87,18 @@ static void app_audio(int32_t *out, uint32_t n);
 static void app_main(void);
 
 /* the script: at t ms, keys down (bit k = key k, 0 = F3), a button edge, a MIDI message. A script file (the second
- * argument) replaces it, a line each: "T keys MASK" (hex or decimal), "T btn ID", "T midi ST D1 D2", "T end" */
-typedef struct { uint32_t t, keys; int btn; uint8_t st, d1, d2; } host_ev_t;
+ * argument) replaces it, a line each: "T keys MASK" (hex or decimal), "T btn ID", "T midi ST D1 D2", "T enc ID N"
+ * (encoder ID turned N detents, + = clockwise), "T end" */
+typedef struct { uint32_t t, keys; int btn; uint8_t st, d1, d2; int8_t enc, encn; } host_ev_t;
 static const host_ev_t SCRIPT0[] = {
-    {200, 1u << 7, -1, 0, 0, 0},                                /* C4 */
-    {700, 1u << 7 | 1u << 11 | 1u << 14, -1, 0, 0, 0},          /* + E4 G4: a chord */
-    {1500, 0, -1, 0, 0, 0},
-    {1700, 0, -1, 0x90, 81, 120},                               /* MIDI in: A5 */
-    {2300, 0, -1, 0x80, 81, 0},
-    {2500, 0, BTN_OCT_UP, 0, 0, 0},
-    {2700, 1u << 2 | 1u << 9, -1, 0, 0, 0},                     /* G4 + D5, an octave up */
-    {3400, 0, -1, 0, 0, 0},
+    {200, 1u << 7, -1, 0, 0, 0, -1, 0},                         /* C4 */
+    {700, 1u << 7 | 1u << 11 | 1u << 14, -1, 0, 0, 0, -1, 0},   /* + E4 G4: a chord */
+    {1500, 0, -1, 0, 0, 0, -1, 0},
+    {1700, 0, -1, 0x90, 81, 120, -1, 0},                        /* MIDI in: A5 */
+    {2300, 0, -1, 0x80, 81, 0, -1, 0},
+    {2500, 0, BTN_OCT_UP, 0, 0, 0, -1, 0},
+    {2700, 1u << 2 | 1u << 9, -1, 0, 0, 0, -1, 0},              /* G4 + D5, an octave up */
+    {3400, 0, -1, 0, 0, 0, -1, 0},
 };
 static const host_ev_t *script = SCRIPT0;
 static uint32_t script_n = sizeof SCRIPT0 / sizeof SCRIPT0[0], end_ms = 6500, frame_fps;
@@ -109,12 +112,14 @@ static void read_script(const char *path)
     uint32_t n = 0;
     if (!f) { perror(path); exit(1); }
     while (fgets(line, sizeof line, f) && n < 4096u) {
-        host_ev_t e = {0, 0, -1, 0, 0, 0};
+        host_ev_t e = {0, 0, -1, 0, 0, 0, -1, 0};
         unsigned a = 0, b = 0, c = 0;
+        int ea = 0, eb = 0;
         if (line[0] == '#' || sscanf(line, "%u %15s", &e.t, what) != 2) continue;
         if (!strcmp(what, "end")) { end_ms = e.t; continue; }
         if (!strcmp(what, "keys")) { sscanf(line, "%*u %*s %i", (int *)&e.keys); }
         else if (!strcmp(what, "btn")) { sscanf(line, "%*u %*s %d", &e.btn); }
+        else if (!strcmp(what, "enc")) { sscanf(line, "%*u %*s %d %d", &ea, &eb); e.enc = (int8_t)ea; e.encn = (int8_t)eb; }
         else if (!strcmp(what, "midi")) { sscanf(line, "%*u %*s %i %u %u", (int *)&a, &b, &c); e.st = (uint8_t)a; e.d1 = (uint8_t)b; e.d2 = (uint8_t)c; }
         else continue;
         ev[n++] = e;
@@ -176,6 +181,8 @@ static void platform_poll(void)                 /* one call = one millisecond */
             mq_w++;
         } else if (script[step].btn >= 0)
             host_edges |= 1u << script[step].btn;
+        else if (script[step].enc >= 0)
+            host_enc[script[step].enc % 7] += script[step].encn;
         else
             fm1_in.notes = script[step].keys;
         step++;

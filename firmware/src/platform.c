@@ -68,6 +68,7 @@ static volatile uint32_t fm1_ms;                /* milliseconds since power-on (
 
 /* ---- flash: read anywhere; erase / program only the update's staging area and the settings sector */
 #define SETTINGS_AT 0x000FC000u                 /* one 4 KiB sector of Felucca's globals area */
+#define SETTINGS_MAX (4096u - 12u)              /* the sector minus the header (OberVave keeps 32 programs in it) */
 #define FL_RANGE_OK(off, n) (FL_IN(off, n, FL_OTA_LO, FL_OTA_HI) || FL_IN(off, n, SETTINGS_AT, SETTINGS_AT + 0x1000u))
 #include "fm1_flash.h"
 static uint8_t flash_ok;
@@ -147,7 +148,7 @@ static uint32_t crc32(const uint8_t *p, uint32_t n)
 }
 static int settings_load(void *p, uint32_t n)   /* 0: loaded; else p is untouched */
 {
-    static uint8_t buf[256];
+    static uint8_t buf[SETTINGS_MAX];
     uint32_t h[3];
     if (!flash_ok || n > sizeof buf || st_read(SETTINGS_AT, h, sizeof h) || h[0] != SETTINGS_MAGIC || h[1] != n)
         return -1;
@@ -156,11 +157,11 @@ static int settings_load(void *p, uint32_t n)   /* 0: loaded; else p is untouche
     memcpy(p, buf, n);
     return 0;
 }
-static int settings_save(const void *p, uint32_t n)   /* p in RAM, n <= 256 */
+static int settings_save(const void *p, uint32_t n)   /* p in RAM, n <= SETTINGS_MAX */
 {
     uint32_t h[3] = {SETTINGS_MAGIC, n, 0}, took;
     int rc;
-    if (!flash_ok || n > 256u)
+    if (!flash_ok || n > SETTINGS_MAX)
         return -1;
     h[2] = crc32(p, n);
     if ((rc = fl_erase4k(SETTINGS_AT, &took)) != 0)

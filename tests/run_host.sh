@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")/.."
 mkdir -p build/host
 cc -O2 -Wall -Wno-unused-function -DOBV_HOST -DAPP_VER="\"${APP_VER:-dev}\"" -Ifirmware/src -Ifirmware/gen -o build/host/obervave firmware/src/obervave.c
-build/host/obervave build/host/obervave
+build/host/obervave build/host/obervave ${1:+"$1"}
 python3 - <<'PY'
 from pathlib import Path
 from PIL import Image
