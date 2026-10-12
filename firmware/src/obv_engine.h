@@ -24,7 +24,6 @@ typedef struct {
     int32_t det8;                               /* unison / dual offset, Q8 */
     int32_t gl, gr;                             /* pan gains Q12 */
     int32_t drift;                              /* the vintage random walk */
-    int32_t o2_now;                             /* OSC2's last naive sample: the X-MOD source */
     uint32_t lfo_blk;                           /* blocks since the note on (LFO delay / fade) */
     int32_t lfo_fade;                           /* Q15 */
     uint32_t seq;                               /* allocation order */
@@ -488,25 +487,33 @@ static void voice_block(voice_t *v, uint32_t card)
 /* ---- the samples of one voice: oscillators -> mix -> drive -> filter -> amp -> pan */
 static void voice_render(voice_t *v, int32_t *out)
 {
-    uint32_t i, inc1 = v->inc1, inc2 = v->inc2, pw1 = v->pw1, pw2 = v->pw2;
-    int32_t amp0 = v->amp0, da = v->amp1 - v->amp0, gl = v->gl, gr = v->gr, o2n = v->o2_now;
+    uint32_t i, inc1 = v->inc1, inc2 = v->inc2, pw1 = v->pw1, pw2 = v->pw2, d1 = inc1 >> 15, d2 = inc2 >> 15;
+    int32_t amp0 = v->amp0, da = v->amp1 - v->amp0, gl = v->gl, gr = v->gr, o2n = v->o2.prev;
+    int32_t l1 = lvl1, l2 = lvl2, ln = lvln, drv = drive_q12;
+    uint32_t ft = ftype, xq = xmod_q, sy = sync_on, ww1 = w1, ww2 = w2;
+    int32_t hw1 = (ww1 & OSC_SAW ? -65536 : 0) + (ww1 & OSC_PLS ? -65536 : 0);
+    int32_t hw2 = (ww2 & OSC_SAW ? -65536 : 0) + (ww2 & OSC_PLS ? -65536 : 0);
     for (i = 0; i < CTL; i++) {
-        int32_t s1, s2, n, mix, lp, bp, hp, y, amp, rt = -1;
+        int32_t s1, s2, mix, lp, bp, hp, y, amp, rt = -1;
         uint32_t ie = inc1;
-        if (xmod_q) {                           /* OSC2 -> OSC1 linear FM, the step never below inc/16 */
-            int64_t m = (int64_t)inc1 + (((int64_t)inc1 * (o2n * (int32_t)xmod_q)) >> 22);
-            ie = m < (int64_t)(inc1 >> 4) ? inc1 >> 4 : m > 0x7FFFFFFF ? 0x7FFFFFFFu : (uint32_t)m;
+        if (xq) {                               /* OSC2 -> OSC1 linear FM, the step never below inc/16 */
+            int32_t m = (int32_t)(inc1 >> 8 > 0x200000u ? 0x200000u : inc1 >> 8) * (((o2n >> 8) * (int32_t)xq) >> 6);
+            m += (int32_t)inc1;
+            ie = m < (int32_t)(inc1 >> 4) ? inc1 >> 4 : (uint32_t)m;
+            d1 = ie >> 15;
         }
-        s1 = osc_step(&v->o1, ie, pw1, w1, -1, NULL);
-        if (sync_on && v->o1.ph < ie && (ie >> 15))
-            rt = (int32_t)(v->o1.ph / (ie >> 15));
-        s2 = osc_step(&v->o2, inc2, pw2, w2, rt, &o2n);
-        n = (int32_t)(xorshift(&v->noise) >> 16) - 32768;
-        mix = (s1 * lvl1 + s2 * lvl2 + n * lvln) >> 7;
-        if (drive_q12) mix = softclip((int32_t)(((int64_t)mix * drive_q12) >> 12));
+        s1 = osc_step(&v->o1, ie, d1, pw1, ww1, hw1, -1);
+        if (sy && v->o1.ph < ie && d1)
+            rt = (int32_t)(v->o1.ph / d1);
+        s2 = osc_step(&v->o2, inc2, d2, pw2, ww2, hw2, rt);
+        o2n = v->o2.prev;
+        mix = s1 * l1 + s2 * l2;
+        if (ln) mix += ((int32_t)(xorshift(&v->noise) >> 16) - 32768) * ln;
+        mix >>= 7;
+        if (drv) mix = softclip(((mix >> 3) * drv) >> 9);
         else mix = clampi(mix, -65535, 65535);
         svf_step(&v->c1, &v->f1, mix, &lp, &bp, &hp);
-        switch (ftype) {
+        switch (ft) {
         case F_LP12: y = lp; break;
         case F_HP12: y = hp; break;
         case F_BP12: y = bp; break;
@@ -519,7 +526,7 @@ static void voice_render(voice_t *v, int32_t *out)
         out[2u * i] += (y * gl) >> 12;
         out[2u * i + 1u] += (y * gr) >> 12;
     }
-    v->o2_now = o2n;
+    (void)o2n;
 }
 
 static void engine_audio(int32_t *out, uint32_t n)
@@ -542,8 +549,8 @@ static void engine_audio(int32_t *out, uint32_t n)
         }
     }
     for (i = 0; i < n; i++) {                   /* the output stage: a gentle tanh, never a hard clip */
-        int32_t l = softclip((int32_t)(((int64_t)out[2u * i] * vol_q12) >> 12));
-        int32_t r = softclip((int32_t)(((int64_t)out[2u * i + 1u] * vol_q12) >> 12));
+        int32_t l = softclip((clampi(out[2u * i], -262144, 262143) >> 2) * vol_q12 >> 10);
+        int32_t r = softclip((clampi(out[2u * i + 1u], -262144, 262143) >> 2) * vol_q12 >> 10);
         int32_t m = (l + r) >> 1;
         out[2u * i] = l;
         out[2u * i + 1u] = r;

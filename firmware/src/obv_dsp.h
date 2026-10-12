@@ -9,7 +9,7 @@
 static inline int32_t clampi(int32_t v, int32_t lo, int32_t hi) { return v < lo ? lo : v > hi ? hi : v; }
 
 /* tanh(x / 32768 * 2) * 32767, interpolated: x = +-32768 -> +-0.76 full scale, +-65536 -> +-0.96 */
-static inline int32_t softclip(int32_t x)
+static inline __attribute__((always_inline)) int32_t softclip(int32_t x)
 {
     int32_t a = x < 0 ? -x : x, i = a >> 8, y;
     if (i >= 256)
@@ -48,7 +48,7 @@ typedef struct {
 #define OSC_SAW 1u
 #define OSC_PLS 2u
 
-static inline int32_t osc_naive(uint32_t ph, uint32_t pw, uint32_t wave)   /* -98304 .. 98303 */
+static inline __attribute__((always_inline)) int32_t osc_naive(uint32_t ph, uint32_t pw, uint32_t wave)   /* -98304 .. 98303 */
 {
     int32_t v = 0;
     if (wave & OSC_SAW)
@@ -59,21 +59,29 @@ static inline int32_t osc_naive(uint32_t ph, uint32_t pw, uint32_t wave)   /* -9
 }
 
 /* the event: a jump of H (any size up to +-200000) at t (0..32767) before the current sample */
-static inline void osc_event(int32_t *prev, int32_t *cur, int32_t h, int32_t t)
+static inline __attribute__((always_inline)) void osc_event(int32_t *prev, int32_t *cur, int32_t h, int32_t t)
 {
     int32_t u = 32767 - t, h16 = h >> 4;
     *prev += (h16 * ((t * t) >> 15)) >> 12;   /* H/2 * t^2: h16 = H/16, t^2 in Q15, so >> 12 */
     *cur -= (h16 * ((u * u) >> 15)) >> 12;
 }
 
-/* one sample: advance by inc, return the (delayed) output. reset_t >= 0: a hard-sync reset to phase 0 happened
- * reset_t before the current sample (0..32767 = 0..1 sample). *now gets the un-delayed naive value of this
- * sample (for cross modulation). */
-static inline int32_t osc_step(osc_t *o, uint32_t inc, uint32_t pw, uint32_t wave, int32_t reset_t, int32_t *now)
+/* one sample: advance by inc (d = inc >> 15, hw = the height of a wrap of ph: -65536 per saw component,
+ * both precomputed per block), return the delayed output; o->prev then holds this sample's naive value (the
+ * X-MOD source). reset_t >= 0: a hard-sync reset to phase 0 happened reset_t before the current sample
+ * (0..32767 = 0..1 sample). Inlined by force: it is the inner loop. */
+static inline __attribute__((always_inline)) int32_t osc_step(osc_t *o, uint32_t inc, uint32_t d, uint32_t pw,
+                                                              uint32_t wave, int32_t hw, int32_t reset_t)
 {
-    uint32_t old = o->ph, ph = old + inc, d = inc >> 15;
-    int32_t cur, out = o->prev, hw = (wave & OSC_SAW ? -65536 : 0) + (wave & OSC_PLS ? -65536 : 0);
-    if (reset_t >= 0 && d) {
+    uint32_t old = o->ph, ph = old + inc;
+    int32_t cur, out = o->prev;
+    if (reset_t < 0 || !d) {
+        cur = osc_naive(ph, pw, wave);
+        if (ph < inc && d)                      /* wrapped: the saw(s) drop */
+            osc_event(&out, &cur, hw, (int32_t)(ph / d));
+        if ((wave & OSC_PLS) && ph + pw < inc && d)   /* the subtracted saw wraps: the pulse rises */
+            osc_event(&out, &cur, 65536, (int32_t)((ph + pw) / d));
+    } else {
         uint32_t at = ph - d * (uint32_t)reset_t;   /* the phase at the reset instant */
         int32_t t;
         ph = d * (uint32_t)reset_t;             /* reset, then reset_t on */
@@ -82,29 +90,14 @@ static inline int32_t osc_step(osc_t *o, uint32_t inc, uint32_t pw, uint32_t wav
             t = (int32_t)(at / d) + reset_t;
             osc_event(&out, &cur, hw, t > 32767 ? 32767 : t);
         }
-        if (wave & OSC_PLS) {
-            uint32_t qa = at + pw;
-            if (qa < old + pw) {                /* ph + pw wrapped on the way to the reset */
-                t = (int32_t)(qa / d) + reset_t;
-                osc_event(&out, &cur, 65536, t > 32767 ? 32767 : t);
-            }
+        if ((wave & OSC_PLS) && at + pw < old + pw) {   /* ph + pw wrapped on the way to the reset */
+            t = (int32_t)((at + pw) / d) + reset_t;
+            osc_event(&out, &cur, 65536, t > 32767 ? 32767 : t);
         }
         osc_event(&out, &cur, osc_naive(0, pw, wave) - osc_naive(at, pw, wave), reset_t);
-    } else {
-        cur = osc_naive(ph, pw, wave);
-        if (d) {
-            if (ph < inc)                       /* wrapped: the saw(s) drop */
-                osc_event(&out, &cur, hw, (int32_t)(ph / d));
-            if (wave & OSC_PLS) {
-                uint32_t q = ph + pw;
-                if (q < inc)                    /* the subtracted saw wraps: the pulse rises */
-                    osc_event(&out, &cur, 65536, (int32_t)(q / d));
-            }
-        }
     }
     o->ph = ph;
     o->prev = cur;
-    if (now) *now = cur;
     return out;
 }
 
@@ -131,25 +124,25 @@ static inline void svf_coef(svf_coef_t *c, int32_t cut, int32_t k)
 
 /* one sample; *lp, *bp, *hp out. The band-pass state passes a soft saturation: resonance stays warm and bounded
  * (self-oscillation settles instead of running away). Signals within +-150000 keep the products in 32 bits. */
-static inline void svf_step(const svf_coef_t *c, svf_state_t *s, int32_t in, int32_t *lp, int32_t *bp, int32_t *hp)
+static inline __attribute__((always_inline)) void svf_step(const svf_coef_t *c, svf_state_t *s, int32_t in, int32_t *lp, int32_t *bp, int32_t *hp)
 {
     int32_t v3 = in - s->ic2;
     int32_t v1 = (c->a1 * s->ic1 + c->a2 * v3) >> 13;
     int32_t v2 = s->ic2 + ((c->a2 * s->ic1 + c->a3 * v3) >> 13);
     int32_t n1 = 2 * v1 - s->ic1;
-    s->ic1 = softclip(n1 >> 1) << 1;
-    s->ic2 = clampi(2 * v2 - s->ic2, -150000, 150000);
+    s->ic1 = (uint32_t)(n1 + 24576) < 49152u ? n1 : softclip(n1 >> 1) << 1;   /* linear below +-0.75, then soft */
+    s->ic2 = 2 * v2 - s->ic2;
     *lp = v2;
     *bp = v1;
     *hp = in - ((c->k * v1) >> 12) - v2;
 }
 
-static inline int32_t svf_lp(const svf_coef_t *c, svf_state_t *s, int32_t in)   /* the plain stage (24 dB's second) */
+static inline __attribute__((always_inline)) int32_t svf_lp(const svf_coef_t *c, svf_state_t *s, int32_t in)   /* the plain stage (24 dB's second) */
 {
     int32_t v3 = in - s->ic2;
     int32_t v1 = (c->a1 * s->ic1 + c->a2 * v3) >> 13;
     int32_t v2 = s->ic2 + ((c->a2 * s->ic1 + c->a3 * v3) >> 13);
-    s->ic1 = clampi(2 * v1 - s->ic1, -150000, 150000);
-    s->ic2 = clampi(2 * v2 - s->ic2, -150000, 150000);
+    s->ic1 = 2 * v1 - s->ic1;
+    s->ic2 = 2 * v2 - s->ic2;
     return v2;
 }

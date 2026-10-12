@@ -14,6 +14,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __linux__
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <sys/syscall.h>
+#include <linux/perf_event.h>
+#endif
 
 #ifndef APP_NAME
 #define APP_NAME "OBERVAVE"
@@ -170,6 +176,28 @@ static void write_wav(void)
     printf("sound  -> %s (%u frames)\n", name, wav_n);
 }
 
+/* OBV_PERF=1: the instructions the renders take, per sample (Linux perf counter; the chip runs other code, but
+ * sloopDX's engines sit at ~1000-1500 here and fit the ISR, so this is the yardstick) */
+static long perf_fd = -1;
+static uint64_t perf_insns, perf_frames;
+static void perf_open(void)
+{
+#ifdef __linux__
+    struct perf_event_attr a;
+    if (!getenv("OBV_PERF")) return;
+    memset(&a, 0, sizeof a);
+    a.type = PERF_TYPE_HARDWARE; a.size = sizeof a; a.config = PERF_COUNT_HW_INSTRUCTIONS;
+    a.exclude_kernel = 1; a.exclude_hv = 1; a.disabled = 1;
+    perf_fd = syscall(SYS_perf_event_open, &a, 0, -1, -1, 0);
+#endif
+}
+static void perf_report(void)
+{
+    if (perf_fd >= 0 && perf_frames)
+        printf("perf   %llu instructions / sample over %llu frames (sloopDX engines: ~1000-1500)\n",
+               (unsigned long long)(perf_insns / perf_frames), (unsigned long long)perf_frames);
+}
+
 static void platform_poll(void)                 /* one call = one millisecond */
 {
     static uint32_t step, shot, owed, frame;
@@ -192,7 +220,17 @@ static void platform_poll(void)                 /* one call = one millisecond */
         uint32_t i;
         owed -= 1000u * HALF_FRAMES;
         memset(blk, 0, sizeof blk);
+#ifdef __linux__
+        if (perf_fd >= 0) { ioctl(perf_fd, PERF_EVENT_IOC_RESET, 0); ioctl(perf_fd, PERF_EVENT_IOC_ENABLE, 0); }
+#endif
         app_audio(blk, HALF_FRAMES);
+#ifdef __linux__
+        if (perf_fd >= 0) {
+            long long c = 0;
+            ioctl(perf_fd, PERF_EVENT_IOC_DISABLE, 0);
+            if (read(perf_fd, &c, sizeof c) == sizeof c && fm1_ms > 1000u) { perf_insns += (uint64_t)c; perf_frames += HALF_FRAMES; }
+        }
+#endif
         wav = realloc(wav, (wav_n + HALF_FRAMES) * 4u);
         for (i = 0; i < 2u * HALF_FRAMES; i++) {
             int32_t v = blk[i];                 /* (USB audio at the MASTER knob all the way up) */
@@ -210,6 +248,7 @@ static void platform_poll(void)                 /* one call = one millisecond */
         write_ppm(SHOT[shot++]);
     if (fm1_ms >= end_ms) {
         write_wav();
+        perf_report();
         exit(0);
     }
 }
@@ -219,6 +258,7 @@ int main(int argc, char **argv)
     if (argc > 1) host_out = argv[1];
     if (argc > 2) read_script(argv[2]);
     if (argc > 3) frame_fps = (uint32_t)atoi(argv[3]);
+    perf_open();
     app_main();
     return 0;
 }
