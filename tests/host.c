@@ -59,7 +59,7 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
                 fb[(y + j) * 240u + x + i] = (uint16_t)(c >> 8 | c << 8);
             }
 }
-#define CV_MAX (240u * 64u)
+#define CV_MAX (240u * 120u)
 #include "gfx.c"
 
 #define SETTINGS_MAX (4096u - 12u)

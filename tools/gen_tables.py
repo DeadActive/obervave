@@ -55,6 +55,8 @@ def main(path):
     L += arr("LFO_DELAY_BLK", "uint16_t", [int(round((5000 * (v / 127) ** 2) / 1000 * FS / CTL)) for v in range(128)])
     # equal-power pan: gain Q12 for position 0..128 (sin), the other side reads it mirrored
     L += arr("PAN_Q12", "uint16_t", [int(round(4096 * math.sin(math.pi / 2 * i / 128))) for i in range(129)])
+    # the knobs' arcs: cos in 5 degree steps, Q8
+    L += arr("COS_Q8", "int16_t", [int(round(256 * math.cos(math.radians(5 * i)))) for i in range(72)], 12)
     Path(path).write_text("\n".join(L) + "\n")
     print(f"tables: {path}")
 

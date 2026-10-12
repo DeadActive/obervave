@@ -114,16 +114,10 @@ static void randomize(void)
     edited = 1;
 }
 
-/* ---- the screen (functional first; the look comes next) */
-#define C_PANEL RGB(28, 28, 30)
-#define C_CREAM RGB(236, 226, 198)
-#define C_AMBER RGB(255, 170, 40)
-#define C_RED RGB(255, 40, 30)
-#define C_DIMT RGB(110, 104, 92)
-#define C_RULE RGB(70, 66, 60)
-#define C_SCOPE_BG RGB(34, 22, 10)
+/* ---- the screen (obv_ui.h draws; this decides what and when) */
+#include "obv_ui.h"
 
-static void fmt_u(char *s, uint32_t v)          /* decimal, no leading zeros, returns via s (ends with 0) */
+static void fmt_u(char *s, uint32_t v)          /* decimal, no leading zeros */
 {
     char b[12];
     uint32_t i = 0, j = 0;
@@ -136,9 +130,10 @@ static void scat(char *d, const char *s) { d += slen(d); while ((*d++ = *s++)) ;
 
 static void fmt_ms(char *s, uint32_t ms_x10)
 {
-    if (ms_x10 < 1000u) { fmt_u(s, ms_x10 / 10u); scat(s, "."); char t[4]; fmt_u(t, ms_x10 % 10u); scat(s, t); scat(s, "ms"); }
+    char t[4];
+    if (ms_x10 < 1000u) { fmt_u(s, ms_x10 / 10u); scat(s, "."); fmt_u(t, ms_x10 % 10u); scat(s, t); scat(s, "ms"); }
     else if (ms_x10 < 10000u) { fmt_u(s, ms_x10 / 10u); scat(s, "ms"); }
-    else { char t[4]; fmt_u(s, ms_x10 / 10000u); scat(s, "."); fmt_u(t, (ms_x10 / 1000u) % 10u); scat(s, t); scat(s, "s"); }
+    else { fmt_u(s, ms_x10 / 10000u); scat(s, "."); fmt_u(t, (ms_x10 / 1000u) % 10u); scat(s, t); scat(s, "s"); }
 }
 
 static void param_value(char *s, uint32_t p, uint32_t v)   /* <= 7 characters */
@@ -146,7 +141,7 @@ static void param_value(char *s, uint32_t p, uint32_t v)   /* <= 7 characters */
     char t[8];
     s[0] = 0;
     switch (PDEF[p].kind) {
-    case K_BIP: if ((int32_t)v - 64 < 0) { scat(s, "-"); fmt_u(t, 64u - v); } else { scat(s, v > 64u ? "+" : ""); fmt_u(t, v - 64u); } scat(s, t); break;
+    case K_BIP: if (v < 64u) { scat(s, "-"); fmt_u(t, 64u - v); } else { scat(s, v > 64u ? "+" : ""); fmt_u(t, v - 64u); } scat(s, t); break;
     case K_ONOFF: scat(s, v ? "ON" : "OFF"); break;
     case K_WAVE: scat(s, WAVE_NAME[v & 3u]); break;
     case K_FTYPE: scat(s, FTYPE_NAME[v % 5u]); break;
@@ -157,7 +152,10 @@ static void param_value(char *s, uint32_t p, uint32_t v)   /* <= 7 characters */
     case K_ARP: scat(s, ARP_NAME[v % NARPMODE]); break;
     case K_DIV: scat(s, DIV_NAME[v % NDIV]); break;
     case K_SEMI: if (v < 24u) { scat(s, "-"); fmt_u(t, 24u - v); } else { scat(s, v > 24u ? "+" : ""); fmt_u(t, v - 24u); } scat(s, t); break;
-    case K_MS: fmt_ms(s, TIME_MS_X10[v & 127u]); if (p == P_GLIDE) { if (!v) { s[0] = 0; scat(s, "OFF"); } else { fmt_u(s, GLIDE_MS[v & 127u]); scat(s, "ms"); } } break;
+    case K_MS:
+        if (p == P_GLIDE) { if (!v) scat(s, "OFF"); else { fmt_u(s, GLIDE_MS[v & 127u]); scat(s, "ms"); } }
+        else fmt_ms(s, TIME_MS_X10[v & 127u]);
+        break;
     case K_HZ: { uint32_t h = LFO_HZ_X100[v & 127u]; fmt_u(s, h / 100u); scat(s, "."); fmt_u(t, (h / 10u) % 10u); scat(s, t); scat(s, "Hz"); } break;
     case K_PCT: fmt_u(s, (v * 100u + 63u) / 127u); scat(s, "%"); break;
     case K_CUT: { uint32_t hz = CUT_HZ[(v + 8u) % 137u]; if (hz < 10000u) { fmt_u(s, hz); scat(s, "Hz"); } else { fmt_u(s, hz / 1000u); scat(s, "."); fmt_u(t, (hz / 100u) % 10u); scat(s, t); scat(s, "k"); } } break;
@@ -168,91 +166,51 @@ static void param_value(char *s, uint32_t p, uint32_t v)   /* <= 7 characters */
 
 static void draw_header(void)
 {
-    char s[16], n[PATCH_NAME + 2];
-    uint32_t i;
-    fmt_u(s, prog + 1u);
-    if (prog < 9u) { s[2] = 0; s[1] = s[0]; s[0] = '0'; }
-    cv_begin(240, 40, C_PANEL);
-    cv_text(6, 2, &FONT_L, s, C_RED);
-    for (i = 0; i < PATCH_NAME; i++) n[i] = (char)live.v[NPARAM + i];
-    n[PATCH_NAME] = edited ? '*' : 0;
-    n[PATCH_NAME + 1] = 0;
-    cv_text(62, 4, &FONT_S, n, C_CREAM);
-    cv_text(62, 22, &FONT_S, "OBERVAVE", C_AMBER);
-    cv_rect(0, 39, 240, 1, C_RULE);
-    cv_blit(0, 0);
+    char tags[40];
+    tags[0] = 0;
+    scat(tags, MODE_NAME[live.v[P_MODE] & 3u]);
+    scat(tags, " ");
+    scat(tags, FTYPE_NAME[live.v[P_FTYPE] % 5u]);
+    if (live.v[P_ARP_MODE]) scat(tags, " ARP");
+    if (hold) scat(tags, " HOLD");
+    ui_header(prog, live.v + NPARAM, edited, tags);
 }
 
 static void draw_page(void)
 {
-    char s[16];
-    uint32_t k;
+    knob_view_t k[4];
+    uint32_t i;
     const page_t *pg = &PAGE[page];
-    cv_begin(240, 64, C_PANEL);
-    cv_text(4, 0, &FONT_S, pg->title, C_AMBER);
-    if (save_armed) cv_text(120, 0, &FONT_S, "SAVE? AGAIN", C_RED);
-    for (k = 0; k < 4u; k++) {
-        int32_t x = (int32_t)k * 60, p = pg->p[k], v = 0, max = 127;
-        const char *label = "";
-        s[0] = 0;
+    for (i = 0; i < 4u; i++) {
+        int32_t p = pg->p[i];
+        k[i].present = 0;
+        k[i].bip = 0;
+        k[i].value[0] = 0;
         if (page == PG_GLOBAL) {
             static const char *const GL[4] = {"TEMPO", "MIDI CH", "TUNE", "CPU"};
-            label = GL[k];
-            if (k == 0) { fmt_u(s, set.tempo); v = set.tempo - 40; max = 200; }
-            else if (k == 1) { if (set.midi_ch) fmt_u(s, set.midi_ch); else scat(s, "OMNI"); v = set.midi_ch; max = 16; }
-            else if (k == 2) { if (set.tune < 0) { scat(s, "-"); fmt_u(s + 1, (uint32_t)-set.tune); } else { scat(s, "+"); fmt_u(s + 1, (uint32_t)set.tune); } scat(s, "c"); v = set.tune + 50; max = 100; }
-            else { fmt_u(s, ui_render_us); scat(s, "us"); v = (int32_t)(ui_render_us / 46u); max = 127; }
+            k[i].label = GL[i];
+            k[i].present = 1;
+            if (i == 0) { fmt_u(k[i].value, set.tempo); k[i].v = set.tempo - 40; k[i].max = 200; }
+            else if (i == 1) { if (set.midi_ch) fmt_u(k[i].value, set.midi_ch); else scat(k[i].value, "OMNI"); k[i].v = set.midi_ch; k[i].max = 16; }
+            else if (i == 2) { scat(k[i].value, set.tune < 0 ? "-" : "+"); fmt_u(k[i].value + 1, (uint32_t)(set.tune < 0 ? -set.tune : set.tune)); scat(k[i].value, "c"); k[i].v = set.tune + 50; k[i].max = 100; k[i].bip = 1; }
+            else { fmt_u(k[i].value, ui_render_us); scat(k[i].value, "us"); k[i].v = (int32_t)(ui_render_us > 5800u ? 5800u : ui_render_us); k[i].max = 5800; }
         } else if (p >= 0) {
-            label = PDEF[p].name;
-            v = live.v[p];
-            max = PDEF[p].max;
-            param_value(s, (uint32_t)p, (uint32_t)v);
-        } else
-            continue;
-        cv_text(x + 2, 20, &FONT_S, label, C_DIMT);
-        cv_text(x + 2, 38, &FONT_S, s, C_CREAM);
-        cv_rect(x + 2, 57, 56, 4, C_RULE);
-        cv_rect(x + 2, 57, 2 + 54 * v / (max ? max : 1), 4, C_AMBER);
+            k[i].label = PDEF[p].name;
+            k[i].v = live.v[p];
+            k[i].max = PDEF[p].max;
+            k[i].bip = PDEF[p].kind == K_BIP || PDEF[p].kind == K_SEMI;
+            k[i].present = 1;
+            param_value(k[i].value, (uint32_t)p, (uint32_t)live.v[p]);
+        }
     }
-    cv_blit(0, 44);
+    ui_page(pg->title, k, save_armed ? "SAVE?" : 0);
 }
 
-static void draw_tags(void)
-{
-    char s[40];
-    s[0] = 0;
-    scat(s, MODE_NAME[live.v[P_MODE] & 3u]);
-    scat(s, "  ");
-    scat(s, FTYPE_NAME[live.v[P_FTYPE] % 5u]);
-    if (live.v[P_ARP_MODE]) scat(s, "  ARP");
-    if (hold) scat(s, "  HOLD");
-    draw_text_box(0, 112, 240, &FONT_S, s, C_DIMT, 1);
-}
-
-static void draw_scope(void)
-{
-    uint32_t i;
-    cv_begin(240, 60, C_SCOPE_BG);
-    cv_rect(0, 30, 240, 1, RGB(70, 48, 20));
-    for (i = 1; i < SCOPE_N; i++)
-        cv_line((int32_t)i - 1, 30 - (scope[i - 1u] >> 11), (int32_t)i, 30 - (scope[i] >> 11), C_AMBER);
-    cv_blit(0, 134);
-}
-
-static void draw_leds(void)
-{
-    uint32_t v;
-    cv_begin(240, 20, C_PANEL);
-    for (v = 0; v < NV; v++) {
-        int32_t l = ui_vlevel[v] >> 7;          /* 0..255 */
-        uint16_t c = RGB(40 + (215 * l >> 8), 10 + (60 * l >> 8), 8);
-        cv_rect(14 + (int32_t)v * 28, 4, 16, 12, c);
-    }
-    cv_blit(0, 200);
-}
+static void draw_tags(void) { draw_header(); }
+static void draw_scope(void) { ui_scope(scope, SCOPE_N); }
+static void draw_leds(void) { ui_leds(ui_vlevel, NV); }
 
 /* ---- the main loop */
-static const uint32_t SCALE_INC_UNUSED = 0;   /* (keeps the compiler quiet about INC_C9 in the table header) */
 #define KEY0 53u                                /* key 0 = F3 */
 
 static uint32_t cycle_page(uint32_t first, uint32_t count)   /* a button steps through its pages */
@@ -263,10 +221,9 @@ static uint32_t cycle_page(uint32_t first, uint32_t count)   /* a button steps t
 
 static void app_main(void)
 {
-    uint32_t prev = 0, k, i, dirty_hdr = 1, dirty_page = 1, dirty_tags = 1, t_led = 0, t_scope = 0;
+    uint32_t prev = 0, k, i, dirty_hdr = 1, dirty_page = 1, dirty_tags = 1, t_led = 0, t_scope = 0, t_page = 0, leds_q = 1;
     uint32_t clk_n = 0, clk_t0 = 0, clk_last = 0, leds_prev = 0xFFFFFFFFu;
     uint8_t held_key[27] = {0};
-    (void)SCALE_INC_UNUSED;
     rnd = 0xC0FFEE42u;
     engine_init();
     cc_map_init();
@@ -284,7 +241,7 @@ static void app_main(void)
     ctl_tune8 = set.tune * 256 / 100;
     load_program(set.prog);
 
-    lcd_fill(0, 0, 240, 240, C_PANEL);
+    ui_splash();
     scope_state = 1;
 
     for (;;) {
@@ -437,9 +394,15 @@ static void app_main(void)
 
         /* the screen: only what changed */
         if (dirty_hdr) { dirty_hdr = 0; draw_header(); }
-        if (dirty_page) { dirty_page = 0; draw_page(); }
+        if (dirty_page && fm1_ms - t_page >= 30u) { dirty_page = 0; t_page = fm1_ms; draw_page(); }
         if (dirty_tags) { dirty_tags = 0; draw_tags(); }
-        if (fm1_ms - t_led >= 50u) { t_led = fm1_ms; draw_leds(); if (page == PG_GLOBAL) draw_page(); }
+        if (fm1_ms - t_led >= 40u) {
+            uint32_t q = 0;
+            t_led = fm1_ms;
+            for (k = 0; k < NV; k++) q = q * 9u + ((uint32_t)ui_vlevel[k] >> 12);   /* 8 steps a LED: redraw on a change */
+            if (q != leds_q) { leds_q = q; draw_leds(); }
+            if (page == PG_GLOBAL && fm1_ms - t_page >= 250u) dirty_page = 1;
+        }
         if (scope_state == 3u && fm1_ms - t_scope >= 50u) {
             uint32_t v, best = 0, bl = 0;
             t_scope = fm1_ms;

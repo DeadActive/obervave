@@ -1,0 +1,227 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* The screen: an own design (no copied trade dress). A charcoal panel, cream legends, a red LED program number
+ * drawn as 7-segment digits, "OBERVAVE" with 80s stripe bands through the lower half of the letters, four
+ * anti-aliased round knobs with an amber value arc, a scope strip, eight round voice LEDs. 240 x 240:
+ *   0..43    header: program number, name, tags, the logo
+ *   46..143  the page: title between rules, four knobs (label above, value below)
+ *   146..195 the scope
+ *   200..236 the voice LEDs */
+#define C_PANEL RGB(30, 30, 33)
+#define C_CREAM RGB(236, 226, 198)
+#define C_AMBER RGB(255, 170, 40)
+#define C_RED RGB(255, 44, 32)
+#define C_RED_DIM RGB(62, 18, 14)
+#define C_DIMT RGB(132, 124, 108)
+#define C_RULE RGB(74, 70, 64)
+#define C_KNOB RGB(58, 58, 62)
+#define C_KNOB_HI RGB(96, 96, 102)
+#define C_SCOPE_BG RGB(36, 24, 12)
+#define C_SCOPE_MID RGB(72, 48, 22)
+static const uint16_t STRIPE[3] = {RGB(230, 40, 30), RGB(245, 120, 30), RGB(255, 190, 50)};
+
+/* a * (1 - t) + b * t for RGB565, t = 0..256 */
+static uint16_t blend565(uint16_t a, uint16_t b, uint32_t t)
+{
+    uint32_t r = ((a >> 11) * (256u - t) + (b >> 11) * t) >> 8;
+    uint32_t g = (((a >> 5) & 63u) * (256u - t) + ((b >> 5) & 63u) * t) >> 8;
+    uint32_t bl = ((a & 31u) * (256u - t) + (b & 31u) * t) >> 8;
+    return (uint16_t)(r << 11 | g << 5 | bl);
+}
+
+static inline uint16_t cv_get(int32_t x, int32_t y)
+{
+    y += cv_oy;
+    if ((uint32_t)x < cv_w && (uint32_t)y < cv_h)
+        return swap16(cv_px[(uint32_t)y * cv_w + (uint32_t)x]);
+    return C_PANEL;
+}
+
+/* an anti-aliased disc: coverage from the distance to the centre (pixel centres at +0.5, so in doubled units),
+ * blended over what is there. r in pixels, ring: 0 = full disc, else only r - ring .. r */
+static void cv_disc(int32_t cx, int32_t cy, int32_t r, int32_t ring, uint16_t c)
+{
+    int32_t x, y, ro2 = (2 * r + 1) * (2 * r + 1), ri2 = (2 * r - 1) * (2 * r - 1);
+    int32_t in2 = ring ? (2 * (r - ring) + 1) * (2 * (r - ring) + 1) : -1, in1 = ring ? (2 * (r - ring) - 1) * (2 * (r - ring) - 1) : -1;
+    for (y = cy - r - 1; y <= cy + r + 1; y++)
+        for (x = cx - r - 1; x <= cx + r + 1; x++) {
+            int32_t dx = 2 * (x - cx), dy = 2 * (y - cy), d2 = dx * dx + dy * dy, t;
+            if (d2 >= ro2 || (ring && d2 < in1))
+                continue;
+            t = 256;
+            if (d2 > ri2)                       /* the outer edge: 1 px of coverage */
+                t = 256 * (ro2 - d2) / (ro2 - ri2);
+            if (ring && d2 < in2)               /* the inner edge */
+                t = 256 * (d2 - in1) / (in2 - in1);
+            cv_pset(x, y, t >= 256 ? c : blend565(cv_get(x, y), c, (uint32_t)t));
+        }
+}
+
+/* a line of width 2, for the arcs and pointers */
+static void cv_line2(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint16_t c)
+{
+    cv_line(x0, y0, x1, y1, c);
+    cv_line(x0 + 1, y0, x1 + 1, y1, c);
+    cv_line(x0, y0 + 1, x1, y1 + 1, c);
+}
+
+/* the knob's angle: value 0 at 225 deg (lower left), max at -45 deg (lower right), 270 deg of travel */
+static void knob_xy(int32_t cx, int32_t cy, int32_t rad, int32_t deg, int32_t *x, int32_t *y)
+{
+    int32_t i;
+    while (deg < 0) deg += 360;
+    while (deg >= 360) deg -= 360;
+    i = deg / 5;
+    *x = cx + ((rad * COS_Q8[i]) >> 8);
+    *y = cy - ((rad * COS_Q8[(i + 54u) % 72u]) >> 8);   /* sin = cos(deg - 90): 90 deg = 18 steps back = 54 on */
+}
+
+static void cv_arc(int32_t cx, int32_t cy, int32_t rad, int32_t deg0, int32_t deg1, uint16_t c)   /* clockwise on screen */
+{
+    int32_t d, x0, y0, x1, y1;
+    knob_xy(cx, cy, rad, deg0, &x0, &y0);
+    for (d = deg0 - 5; d >= deg1; d -= 5) {
+        knob_xy(cx, cy, rad, d, &x1, &y1);
+        cv_line2(x0, y0, x1, y1, c);
+        x0 = x1; y0 = y1;
+    }
+}
+
+/* a knob: label above, the value's arc and pointer, the value below. v / max, bip: the arc grows from the middle */
+static void cv_knob(int32_t cx, int32_t cy, const char *label, const char *value, int32_t v, int32_t max, int32_t bip)
+{
+    int32_t ang = 225 - (max ? 270 * v / max : 0), px, py, qx, qy, r = 15;
+    cv_text(cx - text_w(&FONT_S, label) / 2, cy - 44, &FONT_S, label, C_DIMT);
+    cv_arc(cx, cy, r + 6, 225, -45, C_RULE);
+    if (bip) {
+        if (ang < 90) cv_arc(cx, cy, r + 6, 90, ang, C_AMBER);
+        else cv_arc(cx, cy, r + 6, ang, 90, C_AMBER);
+    } else
+        cv_arc(cx, cy, r + 6, 225, ang, C_AMBER);
+    cv_disc(cx, cy, r, 0, C_KNOB);
+    cv_disc(cx, cy, r, 2, C_KNOB_HI);
+    knob_xy(cx, cy, 5, ang, &px, &py);
+    knob_xy(cx, cy, r - 2, ang, &qx, &qy);
+    cv_line2(px, py, qx, qy, C_CREAM);
+    cv_text(cx - text_w(&FONT_S, value) / 2, cy + 24, &FONT_S, value, C_CREAM);
+}
+
+/* 7-segment digit, w 16 x h 28, thickness 4: segments a (top) b c d (bottom) e f g (middle) */
+static void cv_seg7(int32_t x, int32_t y, uint32_t digit, uint16_t on, uint16_t off)
+{
+    static const uint8_t SEG[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
+    uint32_t m = SEG[digit % 10u];
+    const int32_t t = 4, w = 16, h = 28;
+    cv_rect(x + 2, y, w - 4, t, m & 1u ? on : off);                       /* a */
+    cv_rect(x + w - t, y + 2, t, h / 2 - 3, m & 2u ? on : off);           /* b */
+    cv_rect(x + w - t, y + h / 2 + 1, t, h / 2 - 3, m & 4u ? on : off);   /* c */
+    cv_rect(x + 2, y + h - t, w - 4, t, m & 8u ? on : off);               /* d */
+    cv_rect(x, y + h / 2 + 1, t, h / 2 - 3, m & 16u ? on : off);          /* e */
+    cv_rect(x, y + 2, t, h / 2 - 3, m & 32u ? on : off);                  /* f */
+    cv_rect(x + 2, y + h / 2 - 2, w - 4, t, m & 64u ? on : off);          /* g */
+}
+
+/* the stripes: three bands of `band` px from row y0. In the letters (text_only, the logo) the text takes the
+ * band's colour by its brightness; across the screen (the splash) the band runs up to x_to and the letters
+ * stand in it as dark cut-outs */
+static void cv_stripes(int32_t y0, int32_t band, int32_t gap, int32_t x_to, int32_t text_only)
+{
+    int32_t b, y, x;
+    for (b = 0; b < 3; b++)
+        for (y = y0 + b * (band + gap); y < y0 + b * (band + gap) + band; y++)
+            for (x = 0; x < (int32_t)cv_w; x++) {
+                uint16_t c = cv_get(x, y);
+                uint32_t g = (c >> 5) & 63u, is_text = c != C_PANEL && c != C_BLACK && g > 4u;
+                if (text_only) {
+                    if (is_text) cv_pset(x, y, blend565(C_PANEL, STRIPE[b], g * 256u / 63u));
+                } else if (x < x_to)
+                    cv_pset(x, y, is_text ? blend565(STRIPE[b], C_PANEL, g * 256u / 63u) : STRIPE[b]);
+            }
+}
+
+static void draw_logo_small(int32_t x, int32_t y)   /* "OBERVAVE" in FONT_S with the bands through the lower half */
+{
+    cv_text(x, y, &FONT_S, "OBERVAVE", C_CREAM);
+    cv_stripes(y + 10, 2, 0, 0, 1);
+}
+
+/* ---- the parts of the screen (the app decides when) */
+static void ui_header(uint32_t prog, const uint8_t *name, uint32_t edited, const char *tags)
+{
+    char n[PATCH_NAME + 2];
+    uint32_t i;
+    cv_begin(240, 44, C_PANEL);
+    cv_seg7(6, 6, (prog + 1u) / 10u, C_RED, C_RED_DIM);
+    cv_seg7(26, 6, (prog + 1u) % 10u, C_RED, C_RED_DIM);
+    for (i = 0; i < PATCH_NAME; i++) n[i] = (char)name[i];
+    n[PATCH_NAME] = edited ? '*' : 0;
+    n[PATCH_NAME + 1] = 0;
+    cv_text(54, 4, &FONT_S, n, C_CREAM);
+    cv_text(54, 22, &FONT_S, tags, C_DIMT);
+    draw_logo_small(240 - 4 - text_w(&FONT_S, "OBERVAVE"), 4);
+    cv_rect(0, 42, 240, 1, C_RULE);
+    cv_blit(0, 0);
+}
+
+typedef struct { const char *label; char value[12]; int32_t v, max, bip, present; } knob_view_t;
+static void ui_page(const char *title, const knob_view_t *k, const char *note)
+{
+    int32_t tw = text_w(&FONT_S, title), i;
+    cv_begin(240, 98, C_PANEL);
+    cv_rect(6, 9, (240 - tw) / 2 - 14, 1, C_RULE);
+    cv_text((240 - tw) / 2, 1, &FONT_S, title, C_AMBER);
+    cv_rect((240 + tw) / 2 + 8, 9, (240 - tw) / 2 - 14, 1, C_RULE);
+    for (i = 0; i < 4; i++)
+        if (k[i].present)
+            cv_knob(30 + 60 * i, 62, k[i].label, k[i].value, k[i].v, k[i].max, k[i].bip);
+    if (note)
+        cv_text(240 - 4 - text_w(&FONT_S, note), 1, &FONT_S, note, C_RED);
+    cv_blit(0, 46);
+}
+
+static void ui_scope(const int16_t *s, uint32_t n)
+{
+    uint32_t i;
+    cv_begin(240, 50, C_SCOPE_BG);
+    cv_rect(0, 25, 240, 1, C_SCOPE_MID);
+    for (i = 1; i < n; i++)
+        cv_line((int32_t)i - 1, 25 - clampi(s[i - 1u] >> 9, -23, 23), (int32_t)i, 25 - clampi(s[i] >> 9, -23, 23), C_AMBER);
+    cv_blit(0, 146);
+}
+
+static void ui_leds(const volatile int32_t *level, uint32_t n)
+{
+    uint32_t v;
+    cv_begin(240, 36, C_PANEL);
+    for (v = 0; v < n; v++) {
+        uint32_t l = (uint32_t)level[v] >> 7;   /* 0..255 */
+        uint16_t c = blend565(C_RED_DIM, RGB(255, 70, 40), l), halo = blend565(C_PANEL, RGB(255, 70, 40), l / 4u);
+        int32_t cx = 22 + (int32_t)v * 28;
+        if (l > 8u) cv_disc(cx, 17, 10, 0, halo);
+        cv_disc(cx, 17, 6, 0, c);
+        cv_disc(cx, 17, 6, 1, blend565(C_PANEL, c, 160));
+    }
+    cv_blit(0, 200);
+}
+
+/* the splash: the bands sweep in, the name stands in them (~1.2 s, polls meanwhile) */
+static void ui_splash(void)
+{
+    uint32_t t0 = fm1_ms, k;
+    int32_t tw = text_w(&FONT_L, "OBERVAVE"), x0 = (240 - tw) / 2;
+    lcd_fill(0, 0, 240, 240, C_PANEL);
+    for (k = 0; k <= 24u; k++) {
+        int32_t x_to = (int32_t)(k * k * 240u / 576u) + 2;   /* eases in */
+        cv_begin(240, 90, C_PANEL);
+        if (k >= 6u)
+            cv_text(x0, 10, &FONT_L, "OBERVAVE", C_CREAM);
+        cv_stripes(10 + 16, 4, 1, x_to, 0);
+        if (k >= 14u) {
+            const char *s = "8-VOICE ANALOG POLY";
+            cv_text((240 - text_w(&FONT_S, s)) / 2, 66, &FONT_S, s, C_DIMT);
+        }
+        cv_blit(0, 76);
+        while (fm1_ms - t0 < 40u * (k + 1u)) platform_poll();
+    }
+    while (fm1_ms - t0 < 1200u) platform_poll();
+    lcd_fill(0, 0, 240, 240, C_PANEL);
+}
