@@ -18,12 +18,33 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 ## Where things are
 
-- `firmware/src/obervave.c`: the app (still Dinghy's sine: to be replaced). Includes `platform.c` first.
-- `tests/host.c` + `tests/run_host.sh`: the same app on the PC (WAV + screen PNGs, scripted keys/buttons/MIDI).
-  Build flag `OBV_HOST`. To add: `enc ID N` script lines (encoders) so demos can turn knobs.
+- `firmware/src/obervave.c`: the app (panel, MIDI, storage, what to draw when). Includes `platform.c` first, then
+  `obv_dsp.h` (oscillators, SVF, tanh), `obv_params.h` (the parameter table, pages), `obv_engine.h` (voices,
+  envelopes, LFO, arp: the ISR), `obv_patches.h` (32 factory programs), `obv_ui.h` (the drawing).
+- `tools/gen_tables.py` -> `firmware/gen/obv_tables.h` (committed): pitch, SVF g, tanh, envelope / LFO / glide
+  coefficients, pan, cos.
+- `tests/host.c` + `tests/run_host.sh [script]`: the same app on the PC (WAV + screen PNGs, scripted keys /
+  buttons / MIDI / `enc ID N` encoder turns). Film mode (`build/host/obervave OUT script FPS`) writes a frame every
+  1/FPS s and `OUT-log.txt` (keys, key LEDs, button LEDs, encoder positions per frame). `OBV_PERF=1` prints the
+  instructions per sample (Linux perf counter): the yardstick is sloopDX's engines at ~1000-1500; OberVave's worst
+  case (8 voices, LP24, sync + x-mod, saw+pulse, drive) is ~1900, BRASS STAB ~1600. Not yet measured on the device:
+  the GLOBAL page shows the render time in us (budget 5800, aim < 2900).
+- MIDI CC: 74 cutoff, 71 reso, 73 amp attack, 72 amp release, 5 glide, 1 mod depth (the wheel and the knob are one
+  value), 7 volume, 64 sustain, 120/123 all off; every other parameter from CC 20 up in table order, skipping 64
+  (`cc_map_init`). Program change picks the program.
+- The video: `../video/obervave/song.py` (nine OberVaves from the host build, A minor 108 BPM, 32 bars; stems/,
+  f/<part>/ frames + logs, track.wav) and `../video/make_obervave.py` -> `../video/obervave-1.0.mp4`.
 - `tools/build.py`: `./build.sh [--release X.Y]` -> `build/obervave[-X.Y].fwsc`, identity FM-1_95Y.
 - Docs from Dinghy: docs/API.md (platform calls), docs/RULES.md (the chip), docs/MAKE-IT-YOURS.md.
 - Workspace file: `../obervave.code-workspace` (opened in VSCodium Insiders, flatpak).
+
+## Status (2026-10-12, second session)
+
+Engine, patches, controls and the look below are built and host-tested; the device package builds
+(`build/obervave.fwsc`, ~100 KB image, 21 KB RAM) but has **not been run on an FM-1 yet**: first thing next time,
+install it, check the CPU meter (GLO page), the knobs' feel (step 2 per detent on 0..127 parameters, x3 on fast
+turns), and the splash. Open: a device CPU measurement, the look's polish (knob shading, the LEDs' glow), MIDI
+clock sync is tempo-following only (24 clocks measured in the main loop), the arp steps on 16-frame blocks.
 
 ## Plan (agreed in the first session, 2026-10-12)
 
