@@ -35,7 +35,7 @@ static void app_audio(int32_t *out, uint32_t n)
 static struct {
     uint8_t version, prog, tempo, midi_ch;      /* midi_ch 0 = omni, else 1..16 */
     int8_t tune, oct;
-    uint8_t pat, pad;                           /* pat: the sequencer pattern (its own sectors) */
+    uint8_t pat, click;                         /* pat: the sequencer pattern (its own sectors); click: CLICK_* */
     uint32_t used;                              /* bit n: user program n saved */
     patch_t user[NPROG];
 } set;
@@ -58,6 +58,8 @@ static uint32_t step_held_t, step_turned, step_midi, toast_t;
 static uint8_t audition[SEQ_CHORD];             /* the held step's notes sounding (stopped: you hear what you hold) */
 static const char *toast;
 static int is_seq_page(uint32_t pg) { return pg == PG_SEQ; }
+enum { CLICK_OFF, CLICK_REC, CLICK_ON, CLICK_COUNT, NCLICK };   /* COUNT: as REC, and REC armed + PLAY counts in a bar */
+static const char *const CLICK_NAME[NCLICK] = {"OFF", "REC", "ON", "COUNT-IN"};
 /* the panel as sloopDX's: a function button tapped (let go, nothing else touched) opens its pages; held, it is a
  * layer (the keys and knobs change job until it is let go; HOME tapped while it is held locks it open) */
 enum { L_NONE, L_SEQ, L_EDIT, L_GLO, L_SAVE, L_FX };
@@ -131,6 +133,7 @@ static void rec_note(uint32_t on, uint32_t note, uint32_t vel)
     uint32_t t = seq_trk, len = pat.trk[t].len, s0, n, k, held, sms;
     note &= 127u;
     if (!len) return;
+    if (ctl_count) return;                      /* counting in: notes only sound */
     if (on && rec == REC_READY) {               /* the first note: from the top */
         ctl_seq_restart = 1; ctl_seq_run = 1;
         rec = REC_ON;
@@ -409,13 +412,13 @@ static void draw_page(void)
         k[i].bip = 0;
         k[i].value[0] = 0;
         if (page == PG_GLOBAL) {
-            static const char *const GL[4] = {"TEMPO", "MIDI CH", "TUNE", "CPU"};
+            static const char *const GL[4] = {"TEMPO", "CLICK", "MIDI CH", "TUNE"};
             k[i].label = GL[i];
             k[i].present = 1;
             if (i == 0) { fmt_u(k[i].value, set.tempo); k[i].v = set.tempo - 40; k[i].max = 200; }
-            else if (i == 1) { if (set.midi_ch) fmt_u(k[i].value, set.midi_ch); else scat(k[i].value, "OMNI"); k[i].v = set.midi_ch; k[i].max = 16; }
-            else if (i == 2) { scat(k[i].value, set.tune < 0 ? "-" : "+"); fmt_u(k[i].value + 1, (uint32_t)(set.tune < 0 ? -set.tune : set.tune)); scat(k[i].value, "c"); k[i].v = set.tune + 50; k[i].max = 100; k[i].bip = 1; }
-            else { fmt_u(k[i].value, ui_render_us); scat(k[i].value, "us"); k[i].v = (int32_t)(ui_render_us > 5800u ? 5800u : ui_render_us); k[i].max = 5800; }
+            else if (i == 1) { scat(k[i].value, CLICK_NAME[set.click % NCLICK]); k[i].v = set.click % NCLICK; k[i].max = NCLICK - 1; }
+            else if (i == 2) { if (set.midi_ch) fmt_u(k[i].value, set.midi_ch); else scat(k[i].value, "OMNI"); k[i].v = set.midi_ch; k[i].max = 16; }
+            else { scat(k[i].value, set.tune < 0 ? "-" : "+"); fmt_u(k[i].value + 1, (uint32_t)(set.tune < 0 ? -set.tune : set.tune)); scat(k[i].value, "c"); k[i].v = set.tune + 50; k[i].max = 100; k[i].bip = 1; }
         } else if (layer == L_EDIT || layer == L_FX || layer == L_GLO || layer == L_SAVE) {
             layer_knob(&k[i], i);
         } else if (seq_shown()) {
@@ -444,7 +447,11 @@ static void draw_page(void)
             if (pat.trk[seq_trk].mute) scat(title, " MUTED");
             t = title;
         }
-        ui_page(t, k, save_armed ? "SAVE?" : seq_shown() && pat_edited ? "EDITED" : 0);
+        {
+            static char cpu[16];                /* the GLOBAL page: the render time of an audio half (budget 5800 us) */
+            cpu[0] = 0; scat(cpu, "CPU "); fmt_u(cpu + slen(cpu), ui_render_us); scat(cpu, "us");
+            ui_page(t, k, save_armed ? "SAVE?" : seq_shown() && pat_edited ? "EDITED" : page == PG_GLOBAL && !layer ? cpu : 0);
+        }
     }
 }
 
@@ -483,10 +490,11 @@ static void draw_hints(void)
         hints_key = 0xFFFFFFFEu;
         return;
     }
-    key = toasting ? 100u + ((toast_t / 7u) & 0xFFu) : rec == REC_ON ? 200u : rec == REC_READY ? 201u : step_held >= 0 ? 300u : layer ? 400u + layer : r;
+    key = toasting ? 100u + ((toast_t / 7u) & 0xFFu) : rec == REC_ON ? 210u + ui_seq_count : rec == REC_READY ? 201u : step_held >= 0 ? 300u : layer ? 400u + layer : r;
     if (key == hints_key) return;
     hints_key = key;
     if (toasting) ui_hints(toast, "", C_AMBER);
+    else if (rec == REC_ON && ui_seq_count) { static char cnt[16]; cnt[0] = 0; scat(cnt, "COUNT-IN  "); fmt_u(cnt + slen(cnt), 5u - ui_seq_count); ui_hints(cnt, "RECORDING FROM THE NEXT 1", C_RED); }
     else if (rec == REC_ON) ui_hints(seq_trk ? "RECORDING TRACK B" : "RECORDING TRACK A", "PLAY ON TOP  REC: STOP REC", C_RED);
     else if (rec == REC_READY) ui_hints("REC READY", "YOUR FIRST NOTE STARTS IT", C_RED);
     else if (step_held >= 0) ui_hints("KNOB: EDIT  TAP LATER: LONG", "NOTE  LEVEL  RATCHET  GATE", C_AMBER);
@@ -814,6 +822,7 @@ static void app_main(void)
                 }
             }
         }
+        ctl_click = set.click % NCLICK == CLICK_ON || (rec == REC_ON && set.click % NCLICK != CLICK_OFF);
         if (b & (3u << BTN_OCT_DOWN)) {
             if (layer == L_EDIT) {              /* EDIT + OCT- / OCT+: undo / redo (one level: a swap) */
                 if (undo_ok) { pattern_t tmp = pat; pat = undo_pat; undo_pat = tmp; pat_edited = 1; say(b & (1u << BTN_OCT_DOWN) ? "UNDO" : "REDO"); }
@@ -852,7 +861,10 @@ static void app_main(void)
         }
         if (b & (1u << BTN_PLAY)) {             /* start from step 1 / stop (a take ends with it) */
             if (ctl_seq_run) { ctl_seq_run = 0; if (rec == REC_ON) rec = REC_OFF; }
-            else { ctl_seq_restart = 1; ctl_seq_run = 1; if (rec == REC_READY) { rec = REC_ON; undo_save(); } }
+            else {
+                if (rec == REC_READY) { rec = REC_ON; undo_save(); ctl_count = set.click % NCLICK == CLICK_COUNT; }
+                ctl_seq_restart = 1; ctl_seq_run = 1;
+            }
             dirty_tags = dirty_steps = 1;
         }
         if (b & (1u << BTN_REC)) { rec_down = 1; rec_down_t = fm1_ms; }   /* REC acts when let go; held 2 s it clears the track */
@@ -917,8 +929,9 @@ static void app_main(void)
             if (e > 1 || e < -1) e *= 3;        /* a fast turn goes further */
             if (page == PG_GLOBAL) {
                 if (k == 0) { set.tempo = (uint8_t)clampi(set.tempo + e, 40, 240); ctl_tempo = set.tempo; }
-                else if (k == 1) set.midi_ch = (uint8_t)clampi(set.midi_ch + e, 0, 16);
-                else if (k == 2) { set.tune = (int8_t)clampi(set.tune + e, -50, 50); ctl_tune8 = set.tune * 256 / 100; }
+                else if (k == 1) set.click = (uint8_t)clampi((int32_t)(set.click % NCLICK) + (e > 0 ? 1 : -1), 0, NCLICK - 1);
+                else if (k == 2) set.midi_ch = (uint8_t)clampi(set.midi_ch + e, 0, 16);
+                else { set.tune = (int8_t)clampi(set.tune + e, -50, 50); ctl_tune8 = set.tune * 256 / 100; }
                 set_dirty = 1; set_t = fm1_ms;
             } else if (layer == L_EDIT) {
                 edit_turn(k, e);

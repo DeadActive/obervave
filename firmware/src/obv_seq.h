@@ -56,7 +56,7 @@ static void pat_factory(uint32_t n, pattern_t *p)   /* a pattern never saved: em
 /* ---- the player (ISR, per CTL block) */
 typedef struct { uint32_t cnt, dur, step, sub, rat_n, rat_i, gate_at, nsnd, play, tie; uint8_t snd[SEQ_CHORD]; } seqrun_t;
 static seqrun_t sr[2];
-static uint32_t seq_was, seq_beat_cnt;
+static uint32_t seq_was, seq_beat_cnt, seq_beat_n, count_left;
 
 static void seq_release(seqrun_t *r)
 {
@@ -120,12 +120,26 @@ static void seq_tick(void)
             sr[t].play = sr[t].tie = 0;
         }
         seq_beat_cnt = 0;
+        seq_beat_n = 0;
+        count_left = ctl_count ? 4u : 0u;
         seq_was = 1;
     }
     q = ctl_ext_quarter ? ctl_ext_quarter : 60u * FS / clampi(ctl_tempo, 40, 240);
-    if (seq_beat_cnt == 0u) ui_seq_beat++;          /* the beats (the PLAY light flashes on each) */
+    if (seq_beat_cnt == 0u) {                   /* a beat: the PLAY light, the click, the count-in */
+        if (ctl_count && !count_left) {         /* counted in: the tracks from the top, now */
+            ctl_count = 0;
+            seq_beat_n = 0;
+            for (t = 0; t < 2u; t++) { sr[t].step = 0xFFFFFFFFu; sr[t].cnt = sr[t].dur = 0; sr[t].play = sr[t].tie = 0; }
+        }
+        ui_seq_beat++;
+        if (ctl_click || ctl_count) click_start(seq_beat_n % 4u == 0u);
+        seq_beat_n++;
+        if (count_left) count_left--;
+        ui_seq_count = ctl_count ? count_left + 1u : 0u;
+    }
     seq_beat_cnt += CTL;
     if (seq_beat_cnt >= q) seq_beat_cnt = 0;
+    if (ctl_count) return;                      /* counting in: no steps yet */
     for (t = 0; t < 2u; t++) {
         seqrun_t *r = &sr[t];
         const seqtrk_t *k = &pat.trk[t];

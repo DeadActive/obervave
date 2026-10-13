@@ -54,12 +54,14 @@ while a layer is held locks it open; its button lets it go.
 | --- | --- | --- | --- |
 | **SEQ** | steps 1-16 of the page (tap: set with the last note or chord / clear; hold + a later step: one long note); black keys F#3 .. A#4: page 1-8 | NOTE · DIV · SWING · LENGTH; a step held: NOTE · LEVEL · RATCHET · GATE | the sequencer page |
 | **EDIT** | erase that note (playing: as the playhead passes) | SHIFT · LENGTH x2 / 1/2 · TRANSPOSE | OSC / FILTER pages |
-| **GLO** | 1 / 2 mute track A / B, 5 / 6 solo, G5 tap tempo | - | GLOBAL / VOICE / OUTPUT |
+| **GLO** | 1 / 2 mute track A / B, 5 / 6 solo, G5 tap tempo | - | GLOBAL (TEMPO, CLICK, MIDI CH, TUNE; the CPU time in its title) / VOICE / OUTPUT |
 | **SAVE** | 1-8: pattern 1-8 (with SELECT pressed: a random sound) | - | twice: save the program (on the sequencer page: the pattern) |
 | **FX** | notes | CHORUS · DELAY · REVERB mix · DELAY TIME | CHORUS / DELAY / REVERB |
 
 - **PLAY** start / stop (the light flashes on the beat). **REC** playing: record now on top (chords, held notes
-  long) / stop; stopped: armed, the first note starts. **REC held 2 s** clears the track. **EDIT + OCT- / OCT+**
+  long) / stop; stopped: armed, the first note starts (CLICK on COUNT-IN: PLAY counts in a bar first). **REC held
+  2 s** clears the track. The **click** (GLOBAL, KNOB 2): OFF, REC (while recording), ON, COUNT-IN; beat 1 higher, never
+  recorded. **EDIT + OCT- / OCT+**
   undo / redo.
 - **ALGORITHM** picks the track (A / B), **SELECT** is the tempo, **PRESETS** the program, **OCT- / OCT+** the
   octave (both: back to 0). **HOME** PERFORM (CUTOFF, RESO, ENV AMT, RELEASE). **ENV**, **LFO** their pages.

@@ -197,6 +197,17 @@ static void voices_release_all(void)
 
 static void seq_tick(void);                     /* the step sequencer (obv_seq.h): per block, after the arp */
 
+/* the click (main: ctl_click on / off) and a one-bar count-in before a recording (main: ctl_count) */
+static volatile uint32_t ctl_click, ctl_count, ui_seq_count;
+static int32_t click_amp;
+static uint32_t click_ph, click_inc;
+static void click_start(uint32_t accent)        /* beat 1 higher and louder */
+{
+    click_amp = accent ? 9000 : 6000;
+    click_ph = 0;
+    click_inc = accent ? 233739600u : 155826400u;   /* 2400 / 1600 Hz in 2^32 / 44100 steps */
+}
+
 /* ---- the arpeggiator (per block, 0.36 ms steps) */
 static struct { uint32_t cnt, period, gate_at, pos, dir, sounding, note, was_on; } arp;
 
@@ -587,6 +598,15 @@ static void engine_audio(int32_t *out, uint32_t n)
         sc_prev = m;
     }
     fx_process(out, n);
+    for (i = 0; i < n && click_amp; i++) {     /* the click: after the effects, never recorded */
+        int32_t c;
+        click_ph += click_inc;
+        c = click_ph & 0x80000000u ? click_amp : -click_amp;
+        out[2u * i] += c;
+        out[2u * i + 1u] += c;
+        click_amp -= (click_amp >> 8) + 1;      /* ~6 ms */
+        if (click_amp < 64) click_amp = 0;
+    }
 }
 
 static int engine_quiet(void)                   /* nothing sounds: a flash erase is safe */

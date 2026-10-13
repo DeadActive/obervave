@@ -43,6 +43,9 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   DIV / SWING / LENGTH; set steps lit, playhead inverts, keys 1 5 9 13 glow. ALGORITHM = track A/B, SELECT =
   tempo, OCT both = octave 0, PERFORM = CUTOFF RESO ENV AMT RELEASE. REC / PLAY / REC held 2 s as before; patterns
   start empty; REC with the arp records the arp's notes. HOLD stays on the ARP button on its page.
+  The click (set.click, the old pad byte: OFF / REC / ON / COUNT-IN, GLOBAL page KNOB 2; the CPU time moved to that
+  page's title): a 6 ms square after the effects, 2.4 kHz on beat 1, 1.6 kHz else (obv_engine.h); COUNT-IN: REC
+  armed + PLAY counts a bar (ctl_count, the tracks start after it, notes in it only sound).
 - Effects (`obv_fx.h`): all lines int16 in `.pool` (274 KB used of 336). Chorus: one line, two taps a quarter turn
   apart, 4-point Hermite reads. Delay: two 743 ms lines, ping-pong, time in note values of the tempo (1/16 .. 1/2,
   dotted, triplet), the read position slews like a tape when the time changes, a one-pole in the feedback (TONE).
