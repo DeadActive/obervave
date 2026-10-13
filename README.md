@@ -1,5 +1,11 @@
 <p align="center"><img src="assets/logo.png" width="800" alt="OberVave: the name in red glowing outlines, three blue bands through the lower half of the letters"></p>
 
+> **Do not install 1.1 on an FM-1.** On the device, every MIDI message the FM-1 sends over USB arrives broken
+> (the computer drops the port), and an update needs that direction: once 1.1 runs, no installer gets another
+> firmware back on, and the USB rescue (OCT- at power-on) does not come up either. Being fixed; the package stays
+> here for the record only.
+
+
 # OberVave
 
 **One 8-voice analog-style polysynth for the M-VAVE FM-1, with chorus, delay and a plate reverb.**
