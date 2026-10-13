@@ -1,26 +1,20 @@
 <p align="center"><img src="assets/logo.png" width="800" alt="OberVave: the name in red glowing outlines, three blue bands through the lower half of the letters"></p>
 
-> **Do not install 1.1 on an FM-1.** On the device, every MIDI message the FM-1 sends over USB arrives broken
-> (the computer drops the port), and an update needs that direction: once 1.1 runs, no installer gets another
-> firmware back on, and the USB rescue (OCT- at power-on) does not come up either. Being fixed; the package stays
-> here for the record only.
-
-
 # OberVave
 
 **One 8-voice analog-style polysynth for the M-VAVE FM-1, with chorus, delay and a plate reverb.**
 
 OberVave turns the FM-1 into a single, deep instrument in the spirit of the classic American 8-voice poly synths of
 1979-84: two oscillators a voice with hard sync and cross-modulation, a 12 / 24 dB filter with an SEM-style
-lowpass-to-highpass morph, two envelopes, an LFO, an arpeggiator, 32 programs, and three effects after the voices.
-No sequencer, no second engine: one synth, as far as the chip goes.
+lowpass-to-highpass morph, two envelopes, an LFO, an arpeggiator, a two-track step sequencer, 32 programs, and
+three effects after the voices. No second engine: one synth, as far as the chip goes.
 
 <p align="center"><img src="docs/screen.png" width="240" alt="OberVave's screen: program 01 DARK ARP, the ARP page with four knobs, the scope, eight voice LEDs"></p>
 
-> **Status: 1.1, host-tested, not yet run on an FM-1.** The engine, the effects, the programs, the panel and the
-> screen all run in the host build (the same C on a computer: WAV out, screens as PNG). The device package builds
-> (`build/obervave.fwsc`, identity `FM-1_950`). The first install on an FM-1 is the next step; the CPU meter on the
-> GLOBAL page will say whether the reverb stays at the full sample rate.
+> **Status: 1.2.1, runs on the FM-1.** Install it from [thefirmwarehub.com](https://thefirmwarehub.com) or with
+> `tools/fm1_install.py docs/firmware/obervave-1.2.1.fwsc` (identity `FM-1_952`). 1.2.1 fixes the knobs while a
+> function button is held on the GLOBAL page (they turned the GLOBAL settings, such as TUNE, instead of the sequencer). Do not
+> install 1.1: its USB-MIDI out is broken, and once it runs no installer gets another firmware back on (1.2 fixed it).
 
 Hear it: [the video](video/) is nine OberVaves (the host build) playing one slow, dark track; every sound in it,
 drums included, is this firmware.
