@@ -6,6 +6,7 @@
  *   obv_params.h    the parameter table: patches, pages, MIDI CC
  *   obv_fx.h        chorus, ping-pong delay, plate reverb (after the voices, same ISR)
  *   obv_engine.h    the voices, envelopes, LFO, arpeggiator: all in the audio ISR
+ *   obv_seq.h       the step sequencer: two tracks sharing 256 steps, played in the ISR too
  *   obv_patches.h   the factory programs
  *   this file       the panel, MIDI, the screen, the storage
  *
@@ -15,6 +16,7 @@
 #include "obv_params.h"
 #include "obv_fx.h"
 #include "obv_engine.h"
+#include "obv_seq.h"
 #include "obv_patches.h"
 
 static void app_audio(int32_t *out, uint32_t n)
@@ -32,13 +34,18 @@ static void app_audio(int32_t *out, uint32_t n)
 #define SET_VERSION 2u                          /* 2: 80-byte patches (the effects) */
 static struct {
     uint8_t version, prog, tempo, midi_ch;      /* midi_ch 0 = omni, else 1..16 */
-    int8_t tune, oct, pad[2];
+    int8_t tune, oct;
+    uint8_t pat, pad;                           /* pat: the sequencer pattern (its own sectors) */
     uint32_t used;                              /* bit n: user program n saved */
     patch_t user[NPROG];
 } set;
 static uint32_t set_dirty, set_t;
 
-static uint32_t prog, edited, page = PG_PERFORM, hold, save_armed, save_t, quick_uni_prev = 255;
+static uint32_t prog, edited, page = PG_PERFORM, hold, save_armed, save_t, dice_armed, dice_t;
+
+/* the sequencer, as the panel sees it */
+static uint32_t seq_trk, seq_cur[2], rec, rec_held, rec_step, pat_edited, pat_dirty, clear_n;
+static int is_seq_page(uint32_t pg) { return pg == PG_SEQ || pg == PG_SEQ2 || pg == PG_STEP; }
 static uint8_t cc_map[128];                     /* MIDI CC -> parameter + 1, 0 = none */
 
 static void load_program(uint32_t n)
@@ -50,7 +57,40 @@ static void load_program(uint32_t n)
     live = p;
     prog = n;
     edited = 0;
-    quick_uni_prev = 255;
+}
+
+static void load_pattern(uint32_t n)            /* the saved one, else the factory's */
+{
+    pattern_t *p = &pat;
+    n %= NPAT;
+    ctl_panic = 1;                              /* (what the old one held lets go) */
+    if (blob_load(n, p, sizeof *p) || p->magic != PAT_MAGIC) pat_factory(n, p);
+    set.pat = (uint8_t)n;
+    seq_cur[0] = seq_cur[1] = 0;
+    pat_edited = 0;
+}
+
+/* REC: a note (key or MIDI) into the step at the cursor (stopped) or the step nearest now (running). The notes
+ * pressed together make the chord; when all are up the cursor moves on (stopped). */
+static void rec_note(uint32_t on, uint32_t note, uint32_t vel)
+{
+    uint32_t t = seq_trk, len = pat.trk[t].len, k;
+    step_t *st;
+    if (!rec || !len) return;
+    if (!on) {
+        if (rec_held && !--rec_held && !ctl_seq_run) seq_cur[t] = (rec_step + 1u) % len;
+        return;
+    }
+    if (!rec_held) {                            /* the first note of a chord: the step starts over */
+        rec_step = ctl_seq_run ? (ui_seq_pos[t] + (ui_seq_frac[t] >= 128u)) % len : seq_cur[t] % len;
+        st = seq_step(t, rec_step);
+        for (k = 0; k < SEQ_CHORD; k++) st->note[k] = 0;
+    }
+    rec_held++;
+    st = seq_step(t, rec_step);
+    for (k = 0; k < SEQ_CHORD && st->note[k] && st->note[k] != note; k++) ;
+    if (k < SEQ_CHORD && !st->note[k]) { st->note[k] = (uint8_t)note; st->vel = (uint8_t)vel; }
+    pat_edited = 1;
 }
 
 static void cc_map_init(void)
@@ -197,7 +237,43 @@ static void draw_header(void)
     if (live.v[P_ARP_MODE]) scat(tags, " ARP");
     if (live.v[P_CHO_MIX] || live.v[P_DLY_MIX] || live.v[P_REV_MIX]) scat(tags, " FX");
     if (hold) scat(tags, " HOLD");
+    if (ctl_seq_run) scat(tags, " SEQ");
+    if (rec) scat(tags, " REC");
     ui_header(prog, live.v + NPARAM, edited, tags);
+}
+
+static void fmt_s(char *s, int32_t v)          /* signed: +3, -12, 0 */
+{
+    s[0] = 0;
+    if (v) scat(s, v < 0 ? "-" : "+");
+    fmt_u(s + slen(s), (uint32_t)(v < 0 ? -v : v));
+}
+
+static void seq_knob(knob_view_t *k, uint32_t i)   /* the sequencer pages' four knobs */
+{
+    static const char *const L[3][4] = {{"TRACK", "LENGTH", "NOTE", "SWING"}, {"PATTERN", "TRANSP", "MUTE", "CLEAR"},
+                                        {"STEP", "GATE", "RATCHET", "CHANCE"}};
+    seqtrk_t *tk = &pat.trk[seq_trk];
+    step_t *st = seq_step(seq_trk, tk->len ? seq_cur[seq_trk] % tk->len : 0u);
+    char *v = k->value;
+    k->present = 1;
+    k->label = L[page - PG_SEQ][i];
+    if (page == PG_SEQ) {
+        if (i == 0) { scat(v, seq_trk ? "B" : "A"); k->v = (int32_t)seq_trk; k->max = 1; }
+        else if (i == 1) { if (tk->len) fmt_u(v, tk->len); else scat(v, "OFF"); k->v = tk->len; k->max = SEQ_STEPS; }
+        else if (i == 2) { scat(v, DIV_NAME[tk->div % NDIV]); k->v = tk->div; k->max = NDIV - 1; }
+        else { fmt_u(v, tk->swing); scat(v, "%"); k->v = tk->swing - 50; k->max = 25; }
+    } else if (page == PG_SEQ2) {
+        if (i == 0) { fmt_u(v, set.pat + 1u); k->v = set.pat; k->max = NPAT - 1; }
+        else if (i == 1) { fmt_s(v, tk->transp); k->v = tk->transp + 24; k->max = 48; k->bip = 1; }
+        else if (i == 2) { scat(v, tk->mute ? "MUTED" : "OFF"); k->v = tk->mute; k->max = 1; }
+        else { if (clear_n) { fmt_u(v, clear_n); scat(v, "/8"); } else scat(v, "TURN"); k->v = (int32_t)clear_n; k->max = 8; }
+    } else {
+        if (i == 0) { if (tk->len) { fmt_u(v, seq_cur[seq_trk] % tk->len + 1u); } else scat(v, "-"); k->v = (int32_t)seq_cur[seq_trk]; k->max = tk->len > 1u ? tk->len - 1u : 1; }
+        else if (i == 1) { if (st->gate >= GATE_TIE) scat(v, "TIE"); else { fmt_u(v, (st->gate * 100u + 63u) / 127u); scat(v, "%"); } k->v = st->gate; k->max = 127; }
+        else if (i == 2) { fmt_u(v, st->ratch + 1u); scat(v, "x"); k->v = st->ratch; k->max = 3; }
+        else { fmt_u(v, st->chance); scat(v, "%"); k->v = st->chance; k->max = 100; }
+    }
 }
 
 static void draw_page(void)
@@ -218,6 +294,8 @@ static void draw_page(void)
             else if (i == 1) { if (set.midi_ch) fmt_u(k[i].value, set.midi_ch); else scat(k[i].value, "OMNI"); k[i].v = set.midi_ch; k[i].max = 16; }
             else if (i == 2) { scat(k[i].value, set.tune < 0 ? "-" : "+"); fmt_u(k[i].value + 1, (uint32_t)(set.tune < 0 ? -set.tune : set.tune)); scat(k[i].value, "c"); k[i].v = set.tune + 50; k[i].max = 100; k[i].bip = 1; }
             else { fmt_u(k[i].value, ui_render_us); scat(k[i].value, "us"); k[i].v = (int32_t)(ui_render_us > 5800u ? 5800u : ui_render_us); k[i].max = 5800; }
+        } else if (is_seq_page(page)) {
+            seq_knob(&k[i], i);
         } else if (p >= 0) {
             k[i].label = PDEF[p].name;
             k[i].v = live.v[p];
@@ -227,12 +305,63 @@ static void draw_page(void)
             param_value(k[i].value, (uint32_t)p, (uint32_t)live.v[p]);
         }
     }
-    ui_page(pg->title, k, save_armed ? "SAVE?" : 0);
+    ui_page(pg->title, k, save_armed ? "SAVE?" : dice_armed ? "DICE?" : is_seq_page(page) && pat_edited ? "EDITED" : 0);
+}
+
+static void draw_steps(void)
+{
+    char l[32];
+    uint32_t t = seq_trk, len = pat.trk[t].len, c = len ? seq_cur[t] % len : 0u, ph = len ? ui_seq_pos[t] % len : 0u;
+    l[0] = 0;
+    scat(l, t ? "B  " : "A  ");
+    if (len) { fmt_u(l + slen(l), (ctl_seq_run && !rec ? ph : c) + 1u); scat(l, "/"); fmt_u(l + slen(l), len); }
+    scat(l, "  PAT ");
+    fmt_u(l + slen(l), set.pat + 1u);
+    ui_steps(t, c, ctl_seq_run && len ? (int32_t)ph : -1, rec, l,
+             rec ? (ctl_seq_run ? "REC LIVE" : "REC") : ctl_seq_run ? "PLAY" : "STOP");
 }
 
 static void draw_tags(void) { draw_header(); }
 static void draw_scope(void) { ui_scope(scope, SCOPE_N); }
 static void draw_leds(void) { ui_leds(ui_vlevel, NV); }
+
+/* a knob on a sequencer page turned by e */
+static void seq_turn(uint32_t knob, int32_t e)
+{
+    uint32_t t = seq_trk, o = t ^ 1u, k;
+    seqtrk_t *tk = &pat.trk[t];
+    step_t *st = seq_step(t, tk->len ? seq_cur[t] % tk->len : 0u);
+    if (page == PG_SEQ) {
+        if (knob == 0) seq_trk = e > 0 ? 1u : 0u;
+        else if (knob == 1) {                   /* the two share 256 steps: A at least 1, B may be off */
+            tk->len = (uint16_t)clampi((int32_t)tk->len + e, t ? 0 : 1, (int32_t)(SEQ_STEPS - pat.trk[o].len));
+            if (tk->len && seq_cur[t] >= tk->len) seq_cur[t] = tk->len - 1u;
+        } else if (knob == 2) tk->div = (uint8_t)clampi((int32_t)tk->div + (e > 0 ? 1 : -1), 0, NDIV - 1);
+        else tk->swing = (uint8_t)clampi((int32_t)tk->swing + e, 50, 75);
+        if (knob) pat_edited = 1;
+    } else if (page == PG_SEQ2) {
+        if (knob == 0) {
+            uint32_t n = (uint32_t)clampi((int32_t)set.pat + (e > 0 ? 1 : -1), 0, NPAT - 1);
+            if (n != set.pat) { load_pattern(n); set_dirty = 1; set_t = fm1_ms; }
+        } else if (knob == 1) { tk->transp = (int8_t)clampi(tk->transp + e, -24, 24); pat_edited = 1; }
+        else if (knob == 2) { tk->mute = e > 0; pat_edited = 1; }
+        else {                                  /* CLEAR: turn it all the way, then the track's steps are empty */
+            clear_n = (uint32_t)clampi((int32_t)clear_n + (e > 0 ? 1 : -1), 0, 8);
+            if (clear_n == 8u) {
+                for (k = 0; k < tk->len; k++) step_clear(seq_step(t, k));
+                clear_n = 0;
+                seq_cur[t] = 0;
+                pat_edited = 1;
+            }
+        }
+    } else if (tk->len) {
+        if (knob == 0) seq_cur[t] = (uint32_t)(((int32_t)(seq_cur[t] % tk->len) + e % (int32_t)tk->len + (int32_t)tk->len) % (int32_t)tk->len);
+        else if (knob == 1) st->gate = (uint8_t)clampi((int32_t)st->gate + e * 2, 1, GATE_TIE);
+        else if (knob == 2) st->ratch = (uint8_t)clampi((int32_t)st->ratch + (e > 0 ? 1 : -1), 0, 3);
+        else st->chance = (uint8_t)clampi((int32_t)st->chance + e * 5, 0, 100);
+        if (knob) pat_edited = 1;
+    }
+}
 
 /* ---- the main loop */
 #define KEY0 53u                                /* key 0 = F3 */
@@ -246,7 +375,7 @@ static uint32_t cycle_page(uint32_t first, uint32_t count)   /* a button steps t
 static void app_main(void)
 {
     uint32_t prev = 0, k, i, dirty_hdr = 1, dirty_page = 1, dirty_tags = 1, t_led = 0, t_scope = 0, t_page = 0, t_hdr = 0, leds_q = 1;
-    uint32_t clk_n = 0, clk_t0 = 0, clk_last = 0, leds_prev = 0xFFFFFFFFu;
+    uint32_t clk_n = 0, clk_t0 = 0, clk_last = 0, leds_prev = 0xFFFFFFFFu, t_steps = 0, ticks_seen = 0, dirty_steps = 1;
     uint8_t held_key[27] = {0};
     rnd = 0xC0FFEE42u;
     engine_init();
@@ -264,6 +393,8 @@ static void app_main(void)
     ctl_tempo = set.tempo;
     ctl_tune8 = set.tune * 256 / 100;
     load_program(set.prog);
+    load_pattern(set.pat);
+    ctl_panic = 0;
 
     ui_splash();
     scope_state = 1;
@@ -280,8 +411,8 @@ static void app_main(void)
         up = prev & ~keys;
         prev = keys;
         for (k = 0; k < 27u; k++) {
-            if (down >> k & 1u) { held_key[k] = (uint8_t)(base + k); note_event(1, held_key[k], 100); midi_send(0x90, held_key[k], 100); }
-            if (up >> k & 1u) { note_event(0, held_key[k], 0); midi_send(0x80, held_key[k], 0); }
+            if (down >> k & 1u) { held_key[k] = (uint8_t)(base + k); note_event(1, held_key[k], 100); midi_send(0x90, held_key[k], 100); rec_note(1, held_key[k], 100); dirty_steps = 1; dirty_page |= rec; }
+            if (up >> k & 1u) { note_event(0, held_key[k], 0); midi_send(0x80, held_key[k], 0); rec_note(0, held_key[k], 0); dirty_steps = 1; dirty_page |= rec; }
         }
 
         /* buttons */
@@ -295,34 +426,54 @@ static void app_main(void)
         if (b & (1u << BTN_FX)) np = cycle_page(PG_CHORUS, 3);
         if (b & (1u << BTN_GLO)) np = page == PG_GLOBAL ? PG_VOICE : page == PG_VOICE ? PG_OUTPUT : PG_GLOBAL;
         if (b & (1u << BTN_ARP)) {
-            static uint32_t arp_last = A_UP;
-            if (page == PG_ARP) {               /* on its page the button is the switch */
-                if (live.v[P_ARP_MODE]) { arp_last = live.v[P_ARP_MODE]; set_param(P_ARP_MODE, A_OFF); }
-                else set_param(P_ARP_MODE, (int32_t)arp_last);
-                dirty_page = dirty_tags = 1;
-            } else np = PG_ARP;
+            if (page == PG_ARP) { hold = !hold; ctl_hold = hold; dirty_tags = 1; }   /* on its page: HOLD (latch) */
+            else np = PG_ARP;
         }
-        if (b & (1u << BTN_PLAY)) { hold = !hold; ctl_hold = hold; dirty_tags = 1; }
-        if (b & (1u << BTN_SEQ)) {              /* UNISON quick toggle, back to what it was */
-            if (live.v[P_MODE] != M_UNISON) { quick_uni_prev = live.v[P_MODE]; set_param(P_MODE, M_UNISON); }
-            else set_param(P_MODE, quick_uni_prev < 4u ? (int32_t)quick_uni_prev : M_POLY);
-            dirty_page = dirty_tags = 1;
+        if (b & (1u << BTN_PLAY)) {             /* the sequencer: start from step 1 / stop */
+            if (ctl_seq_run) ctl_seq_run = 0;
+            else { ctl_seq_restart = 1; ctl_seq_run = 1; }
+            dirty_tags = dirty_steps = 1;
         }
-        if (b & (1u << BTN_REC)) { randomize(); dirty_hdr = dirty_page = dirty_tags = 1; }
+        if (b & (1u << BTN_REC)) {
+            rec = !rec;
+            rec_held = 0;
+            if (rec) np = PG_STEP;
+            dirty_tags = dirty_steps = dirty_page = 1;
+        }
+        if (b & (1u << BTN_SEQ)) {
+            uint32_t len = pat.trk[seq_trk].len;
+            if (rec && len && !ctl_seq_run) {   /* recording: a rest, and on */
+                step_t *st = seq_step(seq_trk, seq_cur[seq_trk] % len);
+                for (k = 0; k < SEQ_CHORD; k++) st->note[k] = 0;
+                seq_cur[seq_trk] = (seq_cur[seq_trk] + 1u) % len;
+                pat_edited = 1;
+                dirty_steps = dirty_page = 1;
+            } else
+                np = page == PG_SEQ ? PG_SEQ2 : page == PG_SEQ2 ? PG_STEP : PG_SEQ;
+        }
+        if (b & (1u << BTN_SEL)) {              /* the SELECT knob pressed twice: a new sound (dice) */
+            if (dice_armed) { dice_armed = 0; randomize(); dirty_hdr = dirty_tags = 1; }
+            else { dice_armed = 1; dice_t = fm1_ms; }
+            dirty_page = 1;
+        }
+        if (dice_armed && fm1_ms - dice_t > 3000u) { dice_armed = 0; dirty_page = 1; }
         if (b & (1u << BTN_SAVE)) {
             if (save_armed) {
-                set.user[prog] = live;
-                set.used |= 1u << prog;
-                set.prog = (uint8_t)prog;
-                edited = 0;
+                if (is_seq_page(page)) pat_dirty = 1;   /* the pattern: saved once the sequencer stops and all is quiet */
+                else {
+                    set.user[prog] = live;
+                    set.used |= 1u << prog;
+                    set.prog = (uint8_t)prog;
+                    edited = 0;
+                    set_dirty = 1; set_t = fm1_ms;
+                }
                 save_armed = 0;
-                set_dirty = 1; set_t = fm1_ms;
                 dirty_hdr = 1;
             } else { save_armed = 1; save_t = fm1_ms; }
             dirty_page = 1;
         }
         if (save_armed && fm1_ms - save_t > 3000u) { save_armed = 0; dirty_page = 1; }
-        if (np != page) { page = np; dirty_page = 1; }
+        if (np != page) { page = np; dirty_page = dirty_steps = 1; clear_n = 0; }
 
         /* encoders */
         if ((e = fm1_enc_take(ENC_PRESETS)) != 0) {
@@ -338,7 +489,8 @@ static void app_main(void)
         if (cut_shown_t && fm1_ms - cut_shown_t >= 1000u) { cut_shown_t = 0; dirty_hdr = 1; }
         if ((e = fm1_enc_take(ENC_SELECT)) != 0) {
             page = (uint32_t)((int32_t)page + e + (int32_t)NPAGE * 4) % NPAGE;
-            dirty_page = 1;
+            dirty_page = dirty_steps = 1;
+            clear_n = 0;
         }
         for (k = 0; k < 4u; k++) {
             int32_t p = PAGE[page].p[k];
@@ -349,6 +501,9 @@ static void app_main(void)
                 else if (k == 1) set.midi_ch = (uint8_t)clampi(set.midi_ch + e, 0, 16);
                 else if (k == 2) { set.tune = (int8_t)clampi(set.tune + e, -50, 50); ctl_tune8 = set.tune * 256 / 100; }
                 set_dirty = 1; set_t = fm1_ms;
+            } else if (is_seq_page(page)) {
+                seq_turn(k, e);
+                dirty_steps = 1;
             } else if (p >= 0) {
                 int32_t step = PDEF[p].max >= 100 ? 2 : 1;
                 set_param((uint32_t)p, (int32_t)live.v[p] + e * step);
@@ -371,14 +526,19 @@ static void app_main(void)
                 }
                 continue;
             }
-            if (st == 0xFAu || st == 0xFBu) { ctl_arp_restart = 1; clk_n = 0; continue; }
-            if (st == 0xFCu) continue;
+            if (st == 0xFAu || st == 0xFBu) {   /* start / continue: the arp and the sequencer from the top */
+                ctl_arp_restart = 1; clk_n = 0;
+                ctl_seq_restart = 1; ctl_seq_run = 1;
+                dirty_tags = dirty_steps = 1;
+                continue;
+            }
+            if (st == 0xFCu) { ctl_seq_run = 0; dirty_tags = dirty_steps = 1; continue; }
             if (st >= 0xF0u) continue;
             if (set.midi_ch && ch != set.midi_ch) continue;
-            if (kind == 0x90u && d2) note_event(1, d1, d2);
-            else if (kind == 0x80u || kind == 0x90u) note_event(0, d1, 0);
+            if (kind == 0x90u && d2) { note_event(1, d1, d2); rec_note(1, d1, d2); dirty_steps = 1; dirty_page |= rec; }
+            else if (kind == 0x80u || kind == 0x90u) { note_event(0, d1, 0); rec_note(0, d1, 0); dirty_page |= rec; }
             else if (kind == 0xE0u) ctl_bend = (int32_t)(d1 | d2 << 7) - 8192;
-            else if (kind == 0xC0u) { load_program(d1); dirty_hdr = dirty_page = dirty_tags = 1; }
+            else if (kind == 0xC0u) { load_program(d1); dirty_hdr = dirty_page = dirty_tags = 1; set.prog = (uint8_t)prog; }
             else if (kind == 0xB0u) {
                 if (d1 == 7u) ctl_cc7 = d2;
                 else if (d1 == 64u) ctl_sustain = d2 >= 64u;
@@ -398,8 +558,13 @@ static void app_main(void)
         for (k = 0; k < NV; k++)
             if (ui_vlevel[k] > 300 && ui_vnote[k] >= base && ui_vnote[k] < base + 27u)
                 lit |= 1u << (ui_vnote[k] - base);
-        lit |= (hold << 27) | ((uint32_t)(live.v[P_ARP_MODE] != 0) << 28) | ((uint32_t)(set.oct < 0) << 29)
-             | ((uint32_t)(set.oct > 0) << 30) | ((uint32_t)(live.v[P_MODE] == M_UNISON) << 31);
+        if (rec && !ctl_seq_run && pat.trk[seq_trk].len) {   /* recording: the keys of the step under the cursor */
+            const step_t *st = seq_step(seq_trk, seq_cur[seq_trk] % pat.trk[seq_trk].len);
+            for (k = 0; k < SEQ_CHORD && st->note[k]; k++)
+                if (st->note[k] >= base && st->note[k] < base + 27u) lit |= 1u << (st->note[k] - base);
+        }
+        lit |= (ctl_seq_run << 27) | ((uint32_t)(live.v[P_ARP_MODE] != 0) << 28) | ((uint32_t)(set.oct < 0) << 29)
+             | ((uint32_t)(set.oct > 0) << 30) | (rec << 31);
         if (lit != leds_prev) {
             leds_prev = lit;
             for (k = 0; k < 27u; k++) fm1_led_key(KEY_LED(k), lit >> k & 1u);
@@ -407,10 +572,9 @@ static void app_main(void)
             fm1_led_key(BTN_ARP, lit >> 28 & 1u);
             fm1_led_key(BTN_OCT_DOWN, lit >> 29 & 1u);
             fm1_led_key(BTN_OCT_UP, lit >> 30 & 1u);
-            fm1_led_key(BTN_SEQ, lit >> 31 & 1u);
-            for (k = 0; k < 8u; k++)            /* the page buttons: the one whose page shows */
-                ;
+            fm1_led_key(BTN_REC, lit >> 31 & 1u);
         }
+        fm1_led_key(BTN_SEQ, is_seq_page(page));
         fm1_led_key(BTN_HOME, page == PG_PERFORM);
         fm1_led_key(BTN_EDIT, page >= PG_OSC1 && page <= PG_FILTER2);
         fm1_led_key(BTN_ENV, page == PG_FENV || page == PG_AENV);
@@ -430,7 +594,10 @@ static void app_main(void)
             if (q != leds_q) { leds_q = q; draw_leds(); }
             if (page == PG_GLOBAL && fm1_ms - t_page >= 250u) dirty_page = 1;
         }
-        if (scope_state == 3u && fm1_ms - t_scope >= 50u) {
+        if (is_seq_page(page) || rec) {        /* the sequencer's strip instead of the scope */
+            if (ui_seq_ticks != ticks_seen) { ticks_seen = ui_seq_ticks; dirty_steps = 1; }
+            if (dirty_steps && fm1_ms - t_steps >= 30u) { dirty_steps = 0; t_steps = fm1_ms; draw_steps(); }
+        } else if (scope_state == 3u && fm1_ms - t_scope >= 50u) {
             uint32_t v, best = 0, bl = 0;
             t_scope = fm1_ms;
             draw_scope();
@@ -447,9 +614,14 @@ static void app_main(void)
             draw_scope();
         }
 
-        if (set_dirty && engine_quiet() && fm1_ms - set_t > 2000u) {   /* when silent: an erase stalls the sound */
+        if (set_dirty && !ctl_seq_run && engine_quiet() && fm1_ms - set_t > 2000u) {   /* when silent: an erase stalls the sound */
             settings_save(&set, sizeof set);
             set_dirty = 0;
+        }
+        if (pat_dirty && !ctl_seq_run && engine_quiet()) {
+            blob_save(set.pat, &pat, sizeof pat);
+            pat_dirty = pat_edited = 0;
+            dirty_page = 1;
         }
     }
 }

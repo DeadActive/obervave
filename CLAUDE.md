@@ -6,8 +6,10 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 ## Hard rules
 
-- Nothing from SLOOP / sloopDX / zp12 apps (no sequencer, no grooves, no other engines). Only this one synth,
-  as deep as possible. Dinghy's platform (`platform.c`, `usb.c`, `ota.c`, hal/) stays as it is.
+- Nothing from SLOOP / sloopDX / zp12 apps (no grooves, no other engines; no code from their sequencers). Only this
+  one synth, as deep as possible. Exception asked for by the user on 2026-10-13: an own step sequencer in the style
+  of Baud Girl's FM-1+VA (chords, ratchets, chance; Baud Girl is closed source: the idea only), two tracks sharing
+  256 steps (`obv_seq.h`). Dinghy's platform (`platform.c`, `usb.c`, `ota.c`, hal/) stays as it is.
 - No trademarks in the product: never "Oberheim", "OB-X", "OB-8" on screen, in patch names or in the release name.
   In docs only as "inspired by"; the marks belong to their owners. No artist or song names in patch names. The same
   for "Stranger Things" (Netflix): the user wants that series' dark-arpeggio sound (its theme was played on an
@@ -23,7 +25,17 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 - `firmware/src/obervave.c`: the app (panel, MIDI, storage, what to draw when). Includes `platform.c` first, then
   `obv_dsp.h` (oscillators, SVF, tanh), `obv_params.h` (the parameter table, pages), `obv_fx.h` (chorus, ping-pong
   delay, plate reverb: after the voices in the ISR), `obv_engine.h` (voices, envelopes, LFO, arp: the ISR),
-  `obv_patches.h` (32 factory programs), `obv_ui.h` (the drawing).
+  `obv_patches.h` (32 factory programs), `obv_seq.h` (the sequencer: pattern, factory patterns, the ISR player),
+  `obv_ui.h` (the drawing).
+- Sequencer (`obv_seq.h`): `pattern_t` = magic, 2 tracks {len, div, swing 50-75, transp, mute}, 256 steps {4 notes,
+  vel, gate (127 = TIE), ratch 0-3, chance 0-100}. Track A's step i is `st[i]`, B's is `st[255 - i]` (a length change
+  never moves the other's steps), lenA + lenB <= 256, A >= 1, B 0 = off. `seq_tick` per CTL block after `arp_tick`,
+  straight into `voice_trigger` / `voice_release(n, 1)` (not through the arp). 8 patterns, one flash sector each
+  at 0xF4000.. (`blob_load/save` in platform.c, `FL_RANGE_OK` widened; the host keeps them in RAM); `set.pat` is
+  the current one. Saves wait for the sequencer to stop and the voices to be quiet (the erase stalls the audio).
+  Panel: PLAY run/stop, REC record (stopped: chord at the cursor, SEQ = rest; running: nearest step), SEQ cycles
+  SEQUENCER / SEQ + / STEP, the strip replaces the scope on those pages. HOLD moved to the ARP button on the ARP
+  page, the random sound to SELECT pressed twice, the UNISON quick toggle is gone (VOICE page).
 - Effects (`obv_fx.h`): all lines int16 in `.pool` (274 KB used of 336). Chorus: one line, two taps a quarter turn
   apart, 4-point Hermite reads. Delay: two 743 ms lines, ping-pong, time in note values of the tempo (1/16 .. 1/2,
   dotted, triplet), the read position slews like a tape when the time changes, a one-pole in the feedback (TONE).
@@ -67,6 +79,15 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 - Workspace file: `../obervave.code-workspace` (opened in VSCodium Insiders, flatpak).
 
 ## Status (2026-10-13, third session)
+
+Later on 2026-10-13: **the step sequencer** (two tracks, 256 steps, chords, ratchets, chance, step + live record,
+8 patterns), host-tested (timing 1/16 at 120 BPM checked in the WAV, screens filmed), device build passes. **Not
+on the device**: updates from the running OberVave fail (the FM-1 stops answering after the first read request,
+"update failed" on the screen; the identity handshake answers only sometimes, later not at all; sound and screen
+run normally). Not the effects' load (all off: no change). The first install from SLOOP worked; the rescue mode
+(OCT- held at power-on) did not come up when the user tried. Next: find why the running app starves the USB / the
+updater (TIMER5's USB poll vs the audio ISR? the main loop's drawing?), compare with Dinghy on the device, and get
+the user into the rescue mode to install.
 
 Third session added the effects (chorus / delay / plate reverb, three FX pages), the SEM filter morph, the dark
 arpeggio programs (01 DARK ARP, 26 UPSIDE ARP, 29 NEON PAD; BRASS STAB moved to 13) with effects on most of the
@@ -132,8 +153,8 @@ Priorities from the user: **the audio engine first, the look second**. Max depth
   ENV cycles FILTER ENV / AMP ENV, LFO cycles LFO / LFO DEST / LFO +, FX cycles CHORUS / DELAY / REVERB,
   ARP = arp on/off + its page, GLO cycles GLOBAL (TEMPO, MIDI CH, TUNE, CPU meter) / VOICE (mode, unison, glide) /
   OUTPUT (vintage, spread, bend, volume).
-- PLAY = HOLD (latch / sustain), SEQ = UNISON quick toggle, REC = randomize (in useful ranges), SAVE = save
-  (twice to confirm, PRESETS picks the slot), OCT- / OCT+ = octave. Key LEDs show sounding notes, page buttons lit.
+- (Superseded 2026-10-13 by the sequencer, see above.) PLAY = HOLD, SEQ = UNISON quick toggle, REC = randomize, SAVE
+  = save (twice to confirm, PRESETS picks the slot), OCT- / OCT+ = octave. Key LEDs show sounding notes.
 
 ### Look (240 x 240)
 

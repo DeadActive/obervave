@@ -69,7 +69,10 @@ static volatile uint32_t fm1_ms;                /* milliseconds since power-on (
 /* ---- flash: read anywhere; erase / program only the update's staging area and the settings sector */
 #define SETTINGS_AT 0x000FC000u                 /* one 4 KiB sector of Felucca's globals area */
 #define SETTINGS_MAX (4096u - 12u)              /* the sector minus the header (OberVave keeps 32 programs in it) */
-#define FL_RANGE_OK(off, n) (FL_IN(off, n, FL_OTA_LO, FL_OTA_HI) || FL_IN(off, n, SETTINGS_AT, SETTINGS_AT + 0x1000u))
+#define BLOBS_AT 0x000F4000u                    /* OberVave's sequencer patterns: 8 sectors below the settings, free on the FM-1 */
+#define NBLOB 8u
+#define FL_RANGE_OK(off, n) (FL_IN(off, n, FL_OTA_LO, FL_OTA_HI) || FL_IN(off, n, SETTINGS_AT, SETTINGS_AT + 0x1000u) || \
+                             FL_IN(off, n, BLOBS_AT, BLOBS_AT + NBLOB * 0x1000u))
 #include "fm1_flash.h"
 static uint8_t flash_ok;
 static int st_read(uint32_t off, void *dst, uint32_t n)
@@ -146,30 +149,35 @@ static uint32_t crc32(const uint8_t *p, uint32_t n)
     }
     return ~c;
 }
-static int settings_load(void *p, uint32_t n)   /* 0: loaded; else p is untouched */
+static int sector_load(uint32_t at, void *p, uint32_t n)   /* 0: loaded; else p is untouched */
 {
     static uint8_t buf[SETTINGS_MAX];
     uint32_t h[3];
-    if (!flash_ok || n > sizeof buf || st_read(SETTINGS_AT, h, sizeof h) || h[0] != SETTINGS_MAGIC || h[1] != n)
+    if (!flash_ok || n > sizeof buf || st_read(at, h, sizeof h) || h[0] != SETTINGS_MAGIC || h[1] != n)
         return -1;
-    if (st_read(SETTINGS_AT + sizeof h, buf, n) || crc32(buf, n) != h[2])
+    if (st_read(at + sizeof h, buf, n) || crc32(buf, n) != h[2])
         return -1;
     memcpy(p, buf, n);
     return 0;
 }
-static int settings_save(const void *p, uint32_t n)   /* p in RAM, n <= SETTINGS_MAX */
+static int sector_save(uint32_t at, const void *p, uint32_t n)   /* p in RAM, n <= SETTINGS_MAX */
 {
     uint32_t h[3] = {SETTINGS_MAGIC, n, 0}, took;
     int rc;
     if (!flash_ok || n > SETTINGS_MAX)
         return -1;
     h[2] = crc32(p, n);
-    if ((rc = fl_erase4k(SETTINGS_AT, &took)) != 0)
+    if ((rc = fl_erase4k(at, &took)) != 0)
         return rc;
-    if ((rc = fl_write(SETTINGS_AT + sizeof h, p, n)) != 0)
+    if ((rc = fl_write(at + sizeof h, p, n)) != 0)
         return rc;
-    return fl_write(SETTINGS_AT, (const uint8_t *)h, sizeof h);   /* the header last: a cut save stays invalid */
+    return fl_write(at, (const uint8_t *)h, sizeof h);   /* the header last: a cut save stays invalid */
 }
+static int settings_load(void *p, uint32_t n) { return sector_load(SETTINGS_AT, p, n); }
+static int settings_save(const void *p, uint32_t n) { return sector_save(SETTINGS_AT, p, n); }
+/* blob i (0..NBLOB-1): one more sector each, the same format (OberVave: a sequencer pattern) */
+static int blob_load(uint32_t i, void *p, uint32_t n) { return i < NBLOB ? sector_load(BLOBS_AT + i * 0x1000u, p, n) : -1; }
+static int blob_save(uint32_t i, const void *p, uint32_t n) { return i < NBLOB ? sector_save(BLOBS_AT + i * 0x1000u, p, n) : -1; }
 
 /* ---- MIDI over USB: 4-byte USB-MIDI packets, cable 0 */
 static int midi_get(uint8_t *st, uint8_t *d1, uint8_t *d2)   /* 1: a message (status, data 1, data 2) */

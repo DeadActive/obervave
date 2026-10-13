@@ -195,6 +195,8 @@ static void voices_release_all(void)
     for (v = 0; v < NV; v++) vc[v].gate = 0;
 }
 
+static void seq_tick(void);                     /* the step sequencer (obv_seq.h): per block, after the arp */
+
 /* ---- the arpeggiator (per block, 0.36 ms steps) */
 static struct { uint32_t cnt, period, gate_at, pos, dir, sounding, note, was_on; } arp;
 
@@ -543,6 +545,7 @@ static void engine_audio(int32_t *out, uint32_t n)
     for (b = 0; b < n; b += CTL) {
         engine_events();
         arp_tick();
+        seq_tick();
         lfo_tick();
         block_globals();
         for (v = 0; v < NV; v++) {

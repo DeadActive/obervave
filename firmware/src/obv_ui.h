@@ -204,6 +204,59 @@ static void ui_leds(const volatile int32_t *level, uint32_t n)
     cv_blit(0, 200);
 }
 
+/* the sequencer's strip (instead of the scope): a line of text, then 16 steps of track t around the cursor (rec,
+ * or stopped) or the playhead (running). A step: its chord as bars by pitch, dim when it plays by chance, ticks
+ * for a ratchet, a bridge to the next for a tie. The playhead's step is blue, the cursor's framed in red. */
+static void ui_steps(uint32_t t, uint32_t cursor, int32_t playhead, uint32_t rec, const char *left, const char *right)
+{
+    uint32_t len = pat.trk[t].len, focus = playhead >= 0 && !rec ? (uint32_t)playhead : cursor, w0, i, k;
+    int32_t lo = 127, hi = 0;
+    cv_begin(240, 50, C_SCOPE_BG);
+    cv_text(4, 0, &FONT_S, left, C_CREAM);
+    if (right) cv_text(236 - text_w(&FONT_S, right), 0, &FONT_S, right, rec ? C_RED : C_AMBER);
+    if (!len) {
+        cv_text(4, 24, &FONT_S, "TRACK OFF: GIVE IT A LENGTH", C_DIMT);
+        cv_blit(0, 146);
+        return;
+    }
+    w0 = focus / 16u * 16u;
+    for (i = 0; i < 16u && w0 + i < len; i++) {   /* the pitch range shown: the window's notes, at least an octave */
+        const step_t *st = seq_step(t, w0 + i);
+        for (k = 0; k < SEQ_CHORD && st->note[k]; k++) {
+            if (st->note[k] < lo) lo = st->note[k];
+            if (st->note[k] > hi) hi = st->note[k];
+        }
+    }
+    if (hi < lo) { lo = 48; hi = 72; }
+    if (hi - lo < 12) { lo -= (12 - (hi - lo)) / 2; hi = lo + 12; }
+    for (i = 0; i < 16u; i++) {
+        uint32_t n = w0 + i;
+        int32_t x = (int32_t)i * 15, y = 19, h = 29;
+        const step_t *st;
+        uint16_t bg;
+        if (n >= len) break;
+        st = seq_step(t, n);
+        bg = playhead >= 0 && n == (uint32_t)playhead ? STRIPE[0] : (n & 3u) ? C_KNOB : C_RULE;
+        cv_rect(x + 1, y, 13, h, bg);
+        if (n % 4u == 0u) cv_rect(x + 1, y, 13, 1, C_KNOB_HI);   /* the beats */
+        if (!st->note[0]) cv_rect(x + 6, y + h / 2, 3, 2, C_DIMT);
+        else {
+            uint16_t c = st->chance < 100u ? C_DIMT : C_CREAM;
+            for (k = 0; k < SEQ_CHORD && st->note[k]; k++) {
+                int32_t yy = y + h - 5 - (int32_t)(st->note[k] - lo) * (h - 9) / (hi - lo);
+                cv_rect(x + 3, yy, 9, 2, c);
+            }
+            for (k = 0; k < st->ratch; k++) cv_rect(x + 3 + (int32_t)k * 3, y + h - 3, 2, 2, C_AMBER);
+            if (st->gate >= GATE_TIE && i < 15u) cv_rect(x + 12, y + h / 2 - 1, 5, 3, C_AMBER);
+        }
+        if (n == cursor && (rec || playhead < 0)) {   /* the cursor: a red frame */
+            cv_rect(x, y - 1, 15, 2, C_RED); cv_rect(x, y + h - 1, 15, 2, C_RED);
+            cv_rect(x, y - 1, 2, h + 1, C_RED); cv_rect(x + 13, y - 1, 2, h + 1, C_RED);
+        }
+    }
+    cv_blit(0, 146);
+}
+
 /* the splash: the logo (firmware/gen/obv_splash.h, from tools/make_logo.py --splash). The glowing letters strike
  * like a neon tube (a few flickers, then full), the three bands sweep in from the left, the line under it fades in.
  * ~2.4 s, polls meanwhile. Both layers are RLE over one palette; they are read in step, pixel by pixel */
