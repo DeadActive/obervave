@@ -33,16 +33,14 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   straight into `voice_trigger` / `voice_release(n, 1)` (not through the arp). 8 patterns, one flash sector each
   at 0xF4000.. (`blob_load/save` in platform.c, `FL_RANGE_OK` widened; the host keeps them in RAM); `set.pat` is
   the current one. Saves wait for the sequencer to stop and the voices to be quiet (the erase stalls the audio).
-  Panel (reworked twice on 2026-10-13; the user knows SLOOP / sloopDX and wants it to play like that, and as good
-  as Baud Girl's): REC = live recording (rec REC_OFF / REC_READY / REC_ON; armed, the first note starts the loop;
-  notes added on top, nearest step minus ~12 ms, a held note's release writes its gate or ties on (rec_open);
-  per-note ties in the player, seq_tie_into), REC held 2 s clears the track (acts on release under 0.7 s), EDIT
-  held + key erases (erase_on: as the playhead passes), EDIT + OCT- undo/redo (undo_pat, one level), PLAY flashes
-  on the beat (ui_seq_beat). Step view (SEQ, PG_SEQ): white keys = steps (tap: set ones cleared, empty get `pen`),
-  hold + knob edits PITCH / GATE / RATCHET / CHANCE, OCT- / OCT+ page, black keys F#3 G#3 track, D#4 mute,
-  F#4 G#4 pattern; hints at the bottom (draw_hints, max 30 characters a line). HOLD on the ARP button on the ARP
-  page (the user found it, keep), the dice SAVE held + SELECT. Next from Baud Girl: bigger chords, locks, step
-  move/copy, pattern copy / x2 / half, pattern chain (song).
+  Panel (reworked three times on 2026-10-13; the user knows SLOOP / sloopDX and wants it to play like that; asked
+  to repair this one rather than port sloopDX's): SEQ is a layer as in sloopDX (seq_layer: held = white keys are
+  steps, let go = notes; HOME while held locks it, SEQ unlocks; a plain tap shows PG_SEQ, keys stay notes). In the
+  layer: tap = set / clear, hold + knob = PITCH / GATE / RATCHET / CHANCE, hold a step + tap a later one = one long
+  note (ties), OCT- / OCT+ page, F#3 G#3 track, D#4 mute, F#4 G#4 pattern. REC = live recording on top (REC_READY:
+  the first note starts; held notes become ties; with the arp on, what the arp plays is recorded, via arp_q), REC
+  held 2 s clears the track, EDIT held + key erases, EDIT + OCT- undo, PLAY flashes on the beat. Patterns start
+  empty (no factory patterns). HOLD stays on the ARP button on the ARP page; the dice SAVE held + SELECT.
 - Effects (`obv_fx.h`): all lines int16 in `.pool` (274 KB used of 336). Chorus: one line, two taps a quarter turn
   apart, 4-point Hermite reads. Delay: two 743 ms lines, ping-pong, time in note values of the tempo (1/16 .. 1/2,
   dotted, triplet), the read position slews like a tape when the time changes, a one-pole in the feedback (TONE).
@@ -102,9 +100,10 @@ the same), not the LCD, not the descriptors (EP 0x81 bulk 64, EP 0x84 iso 196, t
 and HAL are byte for byte sloopDX 3.4+'s; zp12 (FM-1_971, worked here) has FELUCCA_UAC 0 and no 48 kHz. Not the USB audio either: a build with FELUCCA_UAC 0 (bcdDevice 3.00, MIDI
 only) babbles the same. The Felucca update loader (same usb.c, polled, interrupts off) and zp12 (usb_poll every
 0.5 ms from TIMER5, also nested in the audio ISR) send fine; OberVave/Dinghy's platform defers usb_poll while
-in_audio ("owed"). That was not it either (tried: no change). **Found:** every build that sends fine has ep1tx at 0 mod 8 (Dinghy,
-zp12, the loader); OberVave's was at 4 mod 8 (aligned(4) only, the layout decides). usb.c now aligns all endpoint
-buffers to 32. Dinghy / sloopDX / zp12 carry the same latent bug.
+in_audio ("owed"). Not that, not the alignment of ep1tx either (32 now, no change). Bisected: Dinghy 0.3 sends fine; Dinghy's app
+on OberVave's platform babbled; **the difference was -O2** (OberVave's APP_CFLAGS, the unity build puts usb.c in
+it). Built with -Os the FM-1 answers every time and installs work again (2026-10-13 21:10). Which line -O2 breaks
+is still unknown; the engine's render time at -Os is not measured on the device yet (the arp ran clean).
 **The way back on (worked 2026-10-13 20:20):** send the UBOOT key (F0 22 24 35 7D F7, host -> FM-1 works) -> the
 mask ROM's "WL80UBOOT1.00" (USB mass storage, /dev/sg0, root) -> jl-uboot-tool's wl82loader.bin (MIT tool,
 JieLi blob, at 0x01C02000, arg 0x0001: SPI NOR) -> its LoaderV2 reads / erases / writes flash (read_id answers one

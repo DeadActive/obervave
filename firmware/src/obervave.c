@@ -58,6 +58,10 @@ static uint32_t step_held_t, step_turned, step_midi, toast_t;
 static uint8_t audition[SEQ_CHORD];             /* the held step's notes sounding (stopped: you hear what you hold) */
 static const char *toast;
 static int is_seq_page(uint32_t pg) { return pg == PG_SEQ; }
+/* SEQ is a layer, as in sloopDX: while it is held (or locked with HOME) the white keys are steps; let go, notes */
+static uint32_t seq_layer, seq_layer_used, seq_press_t, rec_from_arp;   /* layer: 0 off, 1 SEQ held, 2 locked */
+static int steps_on(void) { return seq_layer && !rec; }
+static int seq_shown(void) { return is_seq_page(page) || seq_layer; }
 static void say(const char *s) { toast = s; toast_t = fm1_ms; }
 
 /* the step view: the 16 white keys are steps 1-16 of the page, the black keys are the sequencer's functions */
@@ -97,6 +101,7 @@ static uint32_t rec_nearest(uint32_t t)
 {
     uint32_t len = pat.trk[t].len, dur = ui_seq_dur[t] ? ui_seq_dur[t] : 1u, back = 529u * 256u / dur;
     uint32_t q8 = ui_seq_pos[t] * 256u + (ui_seq_frac[t] > 256u ? 256u : ui_seq_frac[t]);
+    if (rec_from_arp) back = 0;                 /* (the arp's notes are on the grid already) */
     q8 = q8 >= back ? q8 - back : q8 + len * 256u - back;
     return ((q8 + 128u) >> 8) % len;
 }
@@ -386,7 +391,7 @@ static void draw_page(void)
             else if (i == 1) { if (set.midi_ch) fmt_u(k[i].value, set.midi_ch); else scat(k[i].value, "OMNI"); k[i].v = set.midi_ch; k[i].max = 16; }
             else if (i == 2) { scat(k[i].value, set.tune < 0 ? "-" : "+"); fmt_u(k[i].value + 1, (uint32_t)(set.tune < 0 ? -set.tune : set.tune)); scat(k[i].value, "c"); k[i].v = set.tune + 50; k[i].max = 100; k[i].bip = 1; }
             else { fmt_u(k[i].value, ui_render_us); scat(k[i].value, "us"); k[i].v = (int32_t)(ui_render_us > 5800u ? 5800u : ui_render_us); k[i].max = 5800; }
-        } else if (is_seq_page(page)) {
+        } else if (seq_shown()) {
             seq_knob(&k[i], i);
         } else if (p >= 0) {
             k[i].label = PDEF[p].name;
@@ -400,7 +405,7 @@ static void draw_page(void)
     {
         static char title[24];
         const char *t = pg->title;
-        if (is_seq_page(page)) {                /* SEQ A, or STEP 5 A while a step is held */
+        if (seq_shown()) {                      /* SEQ A, or STEP 5 A while a step is held */
             title[0] = 0;
             if (step_held >= 0) { scat(title, "STEP "); fmt_u(title + slen(title), (uint32_t)step_held + 1u); scat(title, " "); }
             else scat(title, "SEQ ");
@@ -408,7 +413,7 @@ static void draw_page(void)
             if (pat.trk[seq_trk].mute) scat(title, " MUTED");
             t = title;
         }
-        ui_page(t, k, save_armed ? "SAVE?" : is_seq_page(page) && pat_edited ? "EDITED" : 0);
+        ui_page(t, k, save_armed ? "SAVE?" : seq_shown() && pat_edited ? "EDITED" : 0);
     }
 }
 
@@ -431,8 +436,8 @@ static uint32_t hints_key = 0xFFFFFFFFu;
 static void draw_hints(void)
 {
     static const char *const ROT[3][2] = {
-        {"WHITE KEYS = STEPS 1-16", "TAP: SET/CLEAR HOLD+KNOB: EDIT"},
-        {"OCT- OCT+: PAGE  F#3 G#3: A/B", "D#4: MUTE  F#4 G#4: PATTERN"},
+        {"HOLD SEQ: KEYS ARE STEPS", "TAP: SET/CLEAR HOLD+KNOB: EDIT"},
+        {"HOLD A STEP, TAP A LATER ONE:", "ONE LONG NOTE TO THERE"},
         {"PLAY: START  REC: RECORD LIVE", "REC HELD=CLEAR EDIT+KEY=ERASE"}};
     static char ring[24];
     uint32_t r = (fm1_ms / 3500u) % 3u, key, held = rec_down ? fm1_ms - rec_down_t : 0u;
@@ -453,7 +458,8 @@ static void draw_hints(void)
     if (toasting) ui_hints(toast, "", C_AMBER);
     else if (rec == REC_ON) ui_hints(seq_trk ? "RECORDING TRACK B" : "RECORDING TRACK A", "PLAY ON TOP  REC: STOP REC", C_RED);
     else if (rec == REC_READY) ui_hints("REC READY", "YOUR FIRST NOTE STARTS IT", C_RED);
-    else if (step_held >= 0) ui_hints("TURN A KNOB: EDIT THIS STEP", "PITCH  GATE  RATCHET  CHANCE", C_AMBER);
+    else if (step_held >= 0) ui_hints("KNOB: EDIT  TAP LATER: LONG", "PITCH  GATE  RATCHET  CHANCE", C_AMBER);
+    else if (seq_layer) ui_hints("WHITE KEYS = STEPS  OCT: PAGE", "F#3 G#3: A/B  HOME: LOCK", C_AMBER);
     else ui_hints(ROT[r][0], ROT[r][1], C_CREAM);
 }
 
@@ -502,9 +508,28 @@ static void seq_key_down(uint32_t k)
     static char msg[20];
     uint32_t t = seq_trk, len = pat.trk[t].len, n, i;
     seqtrk_t *tk = &pat.trk[t];
+    seq_layer_used = 1;
     if (KEY_STEP[k] >= 0) {
         n = seq_pg[t] * 16u + (uint32_t)KEY_STEP[k];
         if (n >= len) { say(len ? "PAST THE TRACK'S LENGTH" : "TRACK OFF: TURN LENGTH"); return; }
+        if (step_held >= 0 && n > (uint32_t)step_held) {   /* hold one step, tap a later one: a long note to there */
+            step_t *a = seq_step(t, (uint32_t)step_held);
+            uint32_t m;
+            static char msg[24];
+            undo_save();
+            if (!a->note[0]) { step_clear(a); a->note[0] = (uint8_t)pen; }
+            a->ratch &= (uint8_t)~STEP_OFF;
+            for (m = (uint32_t)step_held; m <= n; m++) {
+                step_t *st = seq_step(t, m);
+                if (m != (uint32_t)step_held) { uint8_t r = (uint8_t)(a->ratch & 3u); *st = *a; st->ratch = r; }
+                st->gate = m < n ? GATE_TIE : 110;
+            }
+            step_turned = 1;                    /* (the held step is kept when it is let go) */
+            pat_edited = 1;
+            msg[0] = 0; scat(msg, "LONG NOTE "); fmt_u(msg + slen(msg), (uint32_t)step_held + 1u); scat(msg, "-"); fmt_u(msg + slen(msg), n + 1u);
+            say(msg);
+            return;
+        }
         step_held = (int32_t)n;
         step_held_t = fm1_ms;
         step_turned = step_midi = 0;
@@ -609,22 +634,27 @@ static void app_main(void)
         for (k = 0; k < 27u; k++) {             /* the step view: keys are steps / functions; else (and in REC) notes */
             if (down >> k & 1u) {
                 held_key[k] = (uint8_t)(base + k);
-                key_step[k] = fm1_in.buttons & (1u << BTN_EDIT) ? 2u : is_seq_page(page) && !rec ? 1u : 0u;
+                key_step[k] = fm1_in.buttons & (1u << BTN_EDIT) ? 2u : steps_on() ? 1u : 0u;
                 if (key_step[k] == 2u) {        /* EDIT held: the key erases its note */
                     if (!edit_used) undo_save();
                     edit_used = 1;
                     erase_note(held_key[k]);
                     say("ERASED");
                 } else if (key_step[k]) seq_key_down(k);
-                else { note_event(1, held_key[k], 100); midi_send(0x90, held_key[k], 100); rec_note(1, held_key[k], 100); pen = held_key[k]; }
+                else { note_event(1, held_key[k], 100); midi_send(0x90, held_key[k], 100); if (!live.v[P_ARP_MODE]) rec_note(1, held_key[k], 100); pen = held_key[k]; }
                 dirty_steps = dirty_page = 1;
             }
             if (up >> k & 1u) {
                 if (key_step[k] == 2u) erase_on[(uint32_t)clampi((int32_t)held_key[k] - pat.trk[seq_trk].transp, 1, 127)] = 0;
                 else if (key_step[k]) seq_key_up(k);
-                else { note_event(0, held_key[k], 0); midi_send(0x80, held_key[k], 0); rec_note(0, held_key[k], 0); }
+                else { note_event(0, held_key[k], 0); midi_send(0x80, held_key[k], 0); if (!live.v[P_ARP_MODE]) rec_note(0, held_key[k], 0); }
                 dirty_steps = dirty_page = 1;
             }
+        }
+        while (arp_qr != arp_qw) {              /* REC with the arp on: what it plays is recorded */
+            uint8_t on = arp_q[arp_qr % AQ][0], n = arp_q[arp_qr % AQ][1];
+            arp_qr++;
+            if (live.v[P_ARP_MODE]) { rec_from_arp = 1; rec_note(on, n, 100); rec_from_arp = 0; dirty_steps = 1; }
         }
         if (ctl_seq_run && pat.trk[seq_trk].len && ui_seq_pos[seq_trk] != erase_pos) {   /* erasing as the playhead passes */
             uint32_t n;
@@ -645,7 +675,8 @@ static void app_main(void)
             else say("NOTHING TO UNDO");
             edit_used = 1;
             dirty_steps = dirty_page = 1;
-        } else if (is_seq_page(page) && !rec && b & (3u << BTN_OCT_DOWN)) {   /* the step view: OCT- / OCT+ page */
+        } else if (steps_on() && b & (3u << BTN_OCT_DOWN)) {   /* the SEQ layer: OCT- / OCT+ page */
+            seq_layer_used = 1;
             uint32_t t = seq_trk;
             static char msg[20];
             if (b & (1u << BTN_OCT_DOWN) && seq_pg[t]) seq_pg[t]--;
@@ -657,7 +688,11 @@ static void app_main(void)
             if (b & (1u << BTN_OCT_DOWN) && set.oct > -2) { set.oct--; set_dirty = 1; set_t = fm1_ms; }
             if (b & (1u << BTN_OCT_UP) && set.oct < 2) { set.oct++; set_dirty = 1; set_t = fm1_ms; }
         }
-        if (b & (1u << BTN_HOME)) np = PG_PERFORM;
+        if (b & (1u << BTN_HOME)) {
+            if (seq_layer == 1u) { seq_layer = 2; seq_layer_used = 1; say("STEPS LOCKED: SEQ ENDS IT"); }
+            else if (seq_layer == 2u) { seq_layer = 0; dirty_page = dirty_steps = 1; leds_q = 0xFFFFFFFFu; }
+            else np = PG_PERFORM;
+        }
         if (b & (1u << BTN_ENV)) np = cycle_page(PG_FENV, 2);
         if (b & (1u << BTN_LFO)) np = cycle_page(PG_LFO, 3);
         if (b & (1u << BTN_FX)) np = cycle_page(PG_CHORUS, 3);
@@ -695,9 +730,20 @@ static void app_main(void)
             leds_q = 0xFFFFFFFFu;
             dirty_tags = dirty_steps = dirty_page = 1;
         }
-        if (b & (1u << BTN_SEQ)) {              /* the step view on / off (off: back to where you were) */
-            if (is_seq_page(page)) np = seq_back;
-            else { seq_back = page; np = PG_SEQ; }
+        if (b & (1u << BTN_SEQ)) {              /* SEQ down: the step layer (a locked one: SEQ ends it) */
+            if (seq_layer == 2u) { seq_layer = 0; seq_layer_used = 1; }
+            else { seq_layer = 1; seq_layer_used = 0; seq_press_t = fm1_ms; }
+            step_held = -1; audition_off();
+            dirty_page = dirty_steps = 1; hints_key = 0xFFFFFFFFu; leds_q = 0xFFFFFFFFu;
+        }
+        if (rel & (1u << BTN_SEQ)) {
+            if (seq_layer == 1u) {
+                if (!seq_layer_used && fm1_ms - seq_press_t < 400u)   /* a tap: the sequencer page on / off */
+                    np = is_seq_page(page) ? seq_back : (seq_back = page, PG_SEQ);
+                seq_layer = 0;
+            }
+            step_held = -1; audition_off();
+            dirty_page = dirty_steps = 1; hints_key = 0xFFFFFFFFu; leds_q = 0xFFFFFFFFu;
         }
         if (b & (1u << BTN_SEL) && fm1_in.buttons & (1u << BTN_SAVE)) {   /* SAVE held + SELECT: a new sound (dice) */
             randomize();
@@ -706,7 +752,7 @@ static void app_main(void)
         }
         if (b & (1u << BTN_SAVE)) {
             if (save_armed) {
-                if (is_seq_page(page)) pat_dirty = 1;   /* the pattern: saved once the sequencer stops and all is quiet */
+                if (seq_shown()) pat_dirty = 1;   /* the pattern: saved once the sequencer stops and all is quiet */
                 else {
                     set.user[prog] = live;
                     set.used |= 1u << prog;
@@ -752,7 +798,8 @@ static void app_main(void)
                 else if (k == 1) set.midi_ch = (uint8_t)clampi(set.midi_ch + e, 0, 16);
                 else if (k == 2) { set.tune = (int8_t)clampi(set.tune + e, -50, 50); ctl_tune8 = set.tune * 256 / 100; }
                 set_dirty = 1; set_t = fm1_ms;
-            } else if (is_seq_page(page)) {
+            } else if (seq_shown()) {
+                seq_layer_used = 1;
                 seq_turn(k, e);
                 dirty_steps = 1;
             } else if (p >= 0) {
@@ -787,7 +834,7 @@ static void app_main(void)
             if (st >= 0xF0u) continue;
             if (set.midi_ch && ch != set.midi_ch) continue;
             if (kind == 0x90u && d2) {
-                note_event(1, d1, d2); rec_note(1, d1, d2); pen = d1;
+                note_event(1, d1, d2); if (!live.v[P_ARP_MODE]) rec_note(1, d1, d2); pen = d1;
                 if (step_held >= 0 && !rec) {   /* a held step takes what MIDI plays: the first note starts the chord */
                     step_t *sp = seq_step(seq_trk, (uint32_t)step_held);
                     uint32_t q;
@@ -798,7 +845,7 @@ static void app_main(void)
                 }
                 dirty_steps = dirty_page = 1;
             }
-            else if (kind == 0x80u || kind == 0x90u) { note_event(0, d1, 0); rec_note(0, d1, 0); dirty_page |= rec; }
+            else if (kind == 0x80u || kind == 0x90u) { note_event(0, d1, 0); if (!live.v[P_ARP_MODE]) rec_note(0, d1, 0); dirty_page |= rec; }
             else if (kind == 0xE0u) ctl_bend = (int32_t)(d1 | d2 << 7) - 8192;
             else if (kind == 0xC0u) { load_program(d1); dirty_hdr = dirty_page = dirty_tags = 1; set.prog = (uint8_t)prog; }
             else if (kind == 0xB0u) {
@@ -819,7 +866,7 @@ static void app_main(void)
         /* LEDs: the keys that sound, the lit buttons; in the step view the white keys are the steps (glowing: a note
          * there, bright: playing now or held) and the black keys their functions (bright: on, glowing: available) */
         glow = 0;
-        if (is_seq_page(page) && !rec) {
+        if (steps_on()) {
             uint32_t t = seq_trk, len = pat.trk[t].len, w0 = seq_pg[t] * 16u, ph = len ? ui_seq_pos[t] % len : 0u;
             for (k = 0; k < 27u; k++) {
                 if (KEY_STEP[k] >= 0) {
@@ -854,7 +901,7 @@ static void app_main(void)
         {
             uint32_t play_on = ctl_seq_run && fm1_ms - beat_t < 90u;   /* PLAY flashes on the beat */
             uint32_t rec_on = rec == REC_ON || (rec == REC_READY && (fm1_ms / 250u) & 1u);
-            uint32_t pg = is_seq_page(page) && !rec;
+            uint32_t pg = steps_on();
             uint32_t on = pg ? seq_pg[seq_trk] > 0u : set.oct < 0, up2 = pg ? seq_pg[seq_trk] + 1u < seq_pages(seq_trk) : set.oct > 0;
             lit |= (play_on << 27) | ((uint32_t)(live.v[P_ARP_MODE] != 0) << 28) | (on << 29) | (up2 << 30) | (rec_on << 31);
         }
@@ -868,7 +915,7 @@ static void app_main(void)
             fm1_led_key(BTN_OCT_UP, lit >> 30 & 1u);
             fm1_led_key(BTN_REC, lit >> 31 & 1u);
         }
-        fm1_led_key(BTN_SEQ, is_seq_page(page));
+        fm1_led_key(BTN_SEQ, seq_shown());
         fm1_led_key(BTN_HOME, page == PG_PERFORM);
         fm1_led_key(BTN_EDIT, page >= PG_OSC1 && page <= PG_FILTER2);
         fm1_led_key(BTN_ENV, page == PG_FENV || page == PG_AENV);
@@ -886,11 +933,11 @@ static void app_main(void)
             uint32_t q = 0;
             t_led = fm1_ms;
             for (k = 0; k < NV; k++) q = q * 9u + ((uint32_t)ui_vlevel[k] >> 12);   /* 8 steps a LED: redraw on a change */
-            if (is_seq_page(page) || rec || rec_down) draw_hints();   /* the sequencer's hints instead of the voice LEDs */
+            if (seq_shown() || rec || rec_down) draw_hints();   /* the sequencer's hints instead of the voice LEDs */
             else if (q != leds_q) { leds_q = q; draw_leds(); }
             if (page == PG_GLOBAL && fm1_ms - t_page >= 250u) dirty_page = 1;
         }
-        if (is_seq_page(page) || rec) {        /* the sequencer's strip instead of the scope */
+        if (seq_shown() || rec) {               /* the sequencer's strip instead of the scope */
             if (ui_seq_ticks != ticks_seen) { ticks_seen = ui_seq_ticks; dirty_steps = 1; }
             if (dirty_steps && fm1_ms - t_steps >= 30u) { dirty_steps = 0; t_steps = fm1_ms; draw_steps(); }
         } else if (scope_state == 3u && fm1_ms - t_scope >= 50u) {

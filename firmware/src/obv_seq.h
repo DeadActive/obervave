@@ -23,7 +23,7 @@ static volatile uint32_t ctl_seq_run, ctl_seq_restart;
 /* ISR -> main loop: where each track is (step, and how far into it, Q8) */
 static volatile uint32_t ui_seq_pos[2], ui_seq_frac[2], ui_seq_dur[2], ui_seq_ticks, ui_seq_beat;   /* dur: frames */
 
-/* ---- a fresh pattern, and the factory ones (D Phrygian, as the dark arpeggios) */
+/* ---- a fresh pattern */
 static void step_clear(step_t *s)
 {
     uint32_t i;
@@ -47,36 +47,10 @@ static void pat_init(pattern_t *p)
         p->trk[t].pad[0] = p->trk[t].pad[1] = 0;
     }
 }
-static void fac_put(pattern_t *p, uint32_t t, uint32_t i, uint32_t n1, uint32_t n2, uint32_t n3, uint32_t gate,
-                    uint32_t ratch, uint32_t chance, uint32_t vel)
+static void pat_factory(uint32_t n, pattern_t *p)   /* a pattern never saved: empty, track A 16 sixteenths */
 {
-    step_t *s = &p->st[t ? SEQ_STEPS - 1u - i : i];
-    s->note[0] = (uint8_t)n1; s->note[1] = (uint8_t)n2; s->note[2] = (uint8_t)n3; s->note[3] = 0;
-    s->gate = (uint8_t)gate; s->ratch = (uint8_t)ratch; s->chance = (uint8_t)chance; s->vel = (uint8_t)vel;
-}
-static void pat_factory(uint32_t n, pattern_t *p)
-{
-    uint32_t i;
+    (void)n;
     pat_init(p);
-    if (n == 0u) {                              /* DARK RUN: a climbing 16th line over a bass in eighths */
-        static const uint8_t A[16] = {62, 57, 65, 69, 74, 69, 65, 57, 62, 58, 65, 70, 74, 70, 65, 63};
-        static const uint8_t B[8] = {38, 38, 50, 38, 38, 39, 50, 36};
-        p->trk[0].len = 16; p->trk[0].div = D_16;
-        p->trk[1].len = 8; p->trk[1].div = D_8;
-        for (i = 0; i < 16u; i++)
-            fac_put(p, 0, i, A[i], 0, 0, i % 4u == 3u ? 50 : 80, i == 7u || i == 15u ? 1 : 0, i % 8u == 5u ? 60 : 100, i % 4u == 0u ? 118 : 92);
-        for (i = 0; i < 8u; i++)
-            fac_put(p, 1, i, B[i], 0, 0, i == 3u ? GATE_TIE : 100, i == 6u ? 1 : 0, 100, i % 2u ? 96 : 120);
-    } else if (n == 1u) {                       /* CHORDS: four chords tied over two eighths each, a ratcheting bass */
-        static const uint8_t C[4][3] = {{62, 65, 69}, {58, 62, 65}, {60, 63, 67}, {57, 62, 65}};
-        static const uint8_t R[4] = {38, 34, 36, 33};
-        p->trk[0].len = 8; p->trk[0].div = D_8; p->trk[0].swing = 58;
-        p->trk[1].len = 16; p->trk[1].div = D_16;
-        for (i = 0; i < 8u; i++)
-            fac_put(p, 0, i, C[i / 2u][0], C[i / 2u][1], C[i / 2u][2], i % 2u ? 70 : GATE_TIE, 0, 100, 104);
-        for (i = 0; i < 16u; i++)
-            fac_put(p, 1, i, R[i / 4u] + (i % 4u == 2u ? 12u : 0u), 0, 0, 60, i % 4u == 3u ? 2 : 0, i % 4u == 1u ? 70 : 100, i % 4u ? 92 : 122);
-    }
 }
 
 /* ---- the player (ISR, per CTL block) */

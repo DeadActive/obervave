@@ -39,9 +39,8 @@ enum { S_FADDR = 0, S_POWER = 1, S_INTRTX1 = 2, S_INTRTX2 = 3, S_INTRRX1 = 4, S_
        S_TXMAXP = 16, S_CSR0 = 17, S_TXCSR1 = 17, S_TXCSR2 = 18, S_RXMAXP = 19, S_RXCSR1 = 20, S_RXCSR2 = 21,
        S_COUNT0 = 22, S_RXCOUNT1 = 22, S_RXCOUNT2 = 23 };
 
-/* the endpoint buffers are read / written by the USB DMA: 32-byte aligned. With 4 the IN DMA of EP1 babbled
- * (urb -75, the host drops the port) whenever ep1tx landed at 4 mod 8 (OberVave, 2026-10-13); every build that
- * worked had it at 0 mod 8 by luck of the layout */
+/* the endpoint buffers are read / written by the USB DMA: 32-byte aligned (a guess on 2026-10-13 that did not
+ * cure OberVave's MIDI IN babble, kept as harmless; the cure was building the app with -Os, see tools/build.py) */
 static uint8_t ep0buf[64 + 4] __attribute__((aligned(32)));
 static uint8_t ep1tx[64] __attribute__((aligned(32)));
 static uint8_t ep1rx[64 + 4] __attribute__((aligned(32)));

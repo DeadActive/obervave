@@ -200,9 +200,22 @@ static void seq_tick(void);                     /* the step sequencer (obv_seq.h
 /* ---- the arpeggiator (per block, 0.36 ms steps) */
 static struct { uint32_t cnt, period, gate_at, pos, dir, sounding, note, was_on; } arp;
 
+/* ISR -> main loop: the notes the arp plays (REC records them, not the keys that feed it) */
+#define AQ 32u
+static uint8_t arp_q[AQ][2];
+static volatile uint32_t arp_qw, arp_qr;
+static void arp_post(uint32_t on, uint32_t note)
+{
+    if (arp_qw - arp_qr >= AQ) return;
+    arp_q[arp_qw % AQ][0] = (uint8_t)on;
+    arp_q[arp_qw % AQ][1] = (uint8_t)note;
+    RING_PUBLISH();
+    arp_qw++;
+}
+
 static void arp_stop_note(void)
 {
-    if (arp.sounding) { voice_release(arp.note, 1); arp.sounding = 0; }
+    if (arp.sounding) { voice_release(arp.note, 1); arp.sounding = 0; arp_post(0, arp.note); }
 }
 
 static void arp_step(void)
@@ -233,6 +246,7 @@ static void arp_step(void)
     for (i = 0; i < n; i++)                     /* the velocity of that key */
         if (held[i].note == sorted[idx]) break;
     voice_trigger(arp.note, i < n ? held[i].vel : 100u);
+    arp_post(1, arp.note);
     arp.sounding = 1;
     ui_arp_step++;
 }

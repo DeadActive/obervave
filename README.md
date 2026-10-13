@@ -58,12 +58,12 @@ Integers only: the chip has no FPU. The whole engine is fixed point, the tables 
   loop. **REC held 2 s** clears the track (a bar fills on the screen). **EDIT held + a key** erases that note
   (playing: wherever the playhead passes while you hold it; stopped: from the whole track). **EDIT held + OCT-**:
   undo (again: redo).
-- **SEQ** opens the step view: the **16 white keys are steps 1-16** of the page (glowing: a note there, bright:
-  playing now). **Tap** a step: set ones are cleared, empty ones get the last note you played. **Hold** a step and
-  turn a knob: its PITCH, GATE (up to TIE), RATCHET, CHANCE (a MIDI keyboard sets its chord while you hold it). No
-  step held, the knobs are the track's LENGTH, NOTE value, SWING, TRANSPOSE. **OCT- / OCT+** page; black keys
-  F#3 / G#3 track A / B, D#4 mute, F#4 / G#4 pattern. SEQ again: the keys play notes. The screen's bottom line says
-  what the keys do.
+- **SEQ is a layer**, as in sloopDX: **hold SEQ** and the 16 white keys are steps 1-16 of the page (glowing: a note
+  there, bright: playing now); let go and they play notes again (SEQ held + HOME keeps it, SEQ ends it; SEQ tapped
+  shows the sequencer page). In the layer: **tap** a step: set ones are cleared, empty ones get the last note you
+  played. **Hold** a step and turn a knob: its PITCH, GATE (up to TIE), RATCHET, CHANCE. **Hold a step and tap a
+  later one**: one long note from the first to the second. **OCT- / OCT+** page, F#3 / G#3 track A / B, D#4 mute,
+  F#4 / G#4 pattern. Patterns start empty. With the arp on, REC records what the arp plays.
 - **SAVE** twice = save the program, or on a sequencer page the pattern (written once the sequencer stops).
   **SAVE held + SELECT** pressed = a random sound. **OCT- / OCT+** = octave.
 - The key LEDs show the notes that sound, the page buttons light for the page you are on, the eight round LEDs on
