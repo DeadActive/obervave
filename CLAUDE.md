@@ -78,12 +78,16 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   the four-note arpeggio all the way through, four on the floor, a woozy unison lead with octave dives; stems/,
   f/<part>/ frames + logs for all nine, track.wav; `--mix-only` re-sums the stems with new gains) and
   `video/make_video.py` (a shot list: focus / duo / trio / wall of nine, the kick pulses, the clap flashes, a cut
-  tears the colour planes for three frames; before it a 4 s intro: the logo strikes with lightning flashes and a
-  flicker, holds, the bands sweep in, `INTRO`) -> `video/obervave-1.1.mp4`. The renders are git-ignored.
+  tears the colour planes for three frames; the video starts on the music's first beat with sound, and for the first
+  4 s the logo strikes over it with lightning flashes, `INTRO`; the end card says thefirmwarehub.com) ->
+  `video/obervave-1.2.mp4` (copied with thumb + YOUTUBE.md to ~/youtube/fm1-hub/). The renders are git-ignored.
+  The kick and the hats are programmed on OberVave's own step sequencer by key presses (`Part.program_steps`),
+  so the drum screens show the SEQ page; the clap stays on MIDI.
   **The arp and the delay run on the device tempo (settings, 120 BPM at first boot), not on the script's grid**:
   every part dials the song's tempo in on the GLO page first (`Part.setup`), or the arpeggio restarts off the beat
   at every chord change (that was the "springt am Anfang" of 1.1's first cut). The host's splash takes 2.4 s: a
-  script's first key must come after it (T0 = 4.2 s here, the tempo turn runs 2.5 .. 3.2 s).
+  script's first key must come after it (T0 = 9 s here: the tempo turn runs 2.5 .. 3.2 s, the drum programming
+  ~3.6 .. 8 s; the films run 15 s past bar 40 for the end card).
 - `tools/build.py`: `./build.sh [--release X.Y]` -> `build/obervave[-X.Y].fwsc`, identity FM-1_95Y.
 - Docs from Dinghy: docs/API.md (platform calls), docs/RULES.md (the chip), docs/MAKE-IT-YOURS.md.
 - Workspace file: `../obervave.code-workspace` (opened in VSCodium Insiders, flatpak).

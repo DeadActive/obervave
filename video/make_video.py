@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""OberVave video 1.1 (1920 x 1080, 30 fps, ~110 s): nine OberVaves play one slow dark track (song.py: the real firmware's
+"""OberVave video 1.2 (1920 x 1080, 30 fps, ~110 s): nine OberVaves play one slow dark track (song.py: the real firmware's
 host build, all nine screens filmed at 30 fps, its audio). A shot list cuts between them on the bars: one in focus on a
 drawn FM-1 (screen, knobs, buttons, keys lit as the firmware lights them), two side by side, the drum trio, the wall of
-nine. The kick pulses the picture, the clap flashes it, every cut tears the colours for three frames. Before it all the
-logo (tools/make_logo.py) strikes like a neon sign in a storm: flashes, a flicker, then it holds and the bands sweep in.
+nine. The kick pulses the picture, the clap flashes it, every cut tears the colours for three frames. The
+logo (tools/make_logo.py) strikes over the first seconds of the music: flashes, a flicker, then the bands sweep in.
   python3 song.py && python3 make_video.py [--stills]"""
 import math, subprocess, sys, wave
 from pathlib import Path
@@ -13,9 +13,9 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageChops
 
 HERE = Path(__file__).resolve().parent
 A = HERE
-OUT = HERE / "obervave-1.1.mp4"
+OUT = HERE / "obervave-1.2.mp4"
 W, H, FPS = 1920, 1080, 30
-BPM, T0 = 94, 4.2
+BPM, T0 = 94, 9.0                                      # the music starts at T0 in the films (song.py): the video starts there
 BAR = 4 * 60 / BPM
 BG, BG2, PANEL = (10, 13, 22), (18, 23, 36), (30, 36, 52)                 # blue-black, as the firmware's screen
 CREAM, DIM, BLUE, RED = (226, 232, 240), (120, 142, 172), (96, 176, 255), (255, 44, 32)
@@ -55,7 +55,7 @@ def tear(im, k):                                      # a cut: the red and blue 
     b = ImageChops.offset(b, -int(10 * k), 0)
     return Image.merge("RGB", (r, g, b))
 
-# ---- the intro: the logo, 4 s, before the film (its own clock; the track starts after it)
+# ---- the intro: the logo strikes over the first 4 s of the music (its own clock), then the film
 INTRO = 4.0
 INTRO_F = int(INTRO * FPS)
 sys.path.insert(0, str(HERE.parent / "tools"))
@@ -224,7 +224,7 @@ SHOTS = [
     (4, 5, "focus", "kick", "the kick", "That kick is a filter", "No drum machine: the 12 dB filter at full resonance rings like a sine, the envelope drops its pitch. One FM-1, one kick."),
     (5, 8, "focus", "arp", "the arpeggio", "DARK ARP, all the way through", "A four-note chord held, climbed in 16ths. Two saws a hair apart into the 24 dB filter, half shut. A dotted-eighth ping-pong, a long dark plate. The filter opens over sixteen bars."),
     (8, 10, "focus", "bass", "the bass", "Root, octave, root, octave", "FAT BASS: a saw and a pulse an octave below it, drive, glide. Slow disco. The filter stays shut; this is not a happy record."),
-    (10, 12, "trio", "kick clap hat", "the drums", "Drums? Also an 8-voice poly.", "Kick: a ringing filter. Clap: noise through the band-pass, three hits a flam apart, into the plate. Hats: noise through the high-pass, open on the offbeat. Sorry."),
+    (10, 12, "trio", "kick clap hat", "the drums", "Drums? Also an 8-voice poly.", "Kick: a ringing filter. Hats: noise through the high-pass. Both played by OberVave's own step sequencer, set by hand on the keys. Clap: noise through the band-pass, three hits a flam apart, into the plate. Sorry."),
     (12, 14, "focus", "pad", "the pad", "NEON PAD", "Pulse waves, the LFO sways their width with a different phase for every voice. A slow chorus widens it, the plate carries it. The chorus DEPTH goes up as it swells."),
     (14, 16, "duo", "arp pad", "two of nine", "The arpeggio keeps climbing", "Left: the arp, its CUTOFF a little higher every bar. Right: the pad under it. Both the same firmware, both through their own delay and reverb."),
     (16, 20, "focus", "lead", "the lead", "Six voices, slightly seasick", "UNISON LD: six voices wide apart, slow glide, VINTAGE all the way up so they drift. BEND set to an octave: the end of the phrase falls down a hole."),
@@ -265,7 +265,7 @@ def frame(f):
         d.text((1016, 488), "for the next firmware video:", font=F_REG(30), fill=DIM)
         d.text((1016, 528), "youtube.com/@sonzven", font=F_SEMI(48), fill=(255, 110, 80))
         d.text((1016, 606), "Every open-source firmware for the FM-1, one click each:", font=F_LIGHT(30), fill=CREAM)
-        d.text((1016, 648), "fm1.designburgapps.com", font=F_BOLD(44), fill=BLUE)
+        d.text((1016, 648), "thefirmwarehub.com", font=F_BOLD(44), fill=BLUE)
         y = 712
         for ln in ("OberVave: free firmware, GPL-3.0. Built on Dinghy, SLOOP 2.3 (isod89) and Felucca (Hügelton Instruments).",
                    "Inspired by the classic 8-voice poly synths of 1979-84 (trademarks of their owners, no affiliation).",
@@ -320,11 +320,12 @@ def frame(f):
     keyboard(im, 1000, 850, 860, lit)
     return im
 
-total_frames = INTRO_F + min(NF, int((T0 + (END_BAR + 4) * BAR + 3.0) * FPS))
-cut_frames = {INTRO_F}
+F0 = int(T0 * FPS)                                    # the films' frame where the music starts: the video's first
+total_frames = min(NF - F0, int(((END_BAR + 4) * BAR + 3.0) * FPS))
+cut_frames = {INTRO_F}                                # (the logo strikes over the first seconds of the music)
 for s in SHOTS:
-    cut_frames.add(INTRO_F + int((T0 + s[0] * BAR) * FPS))
-cut_frames.add(INTRO_F + int((T0 + END_BAR * BAR) * FPS))
+    if s[0]: cut_frames.add(int(s[0] * BAR * FPS))
+cut_frames.add(int(END_BAR * BAR * FPS))
 
 if "--stills" in sys.argv:
     for bb in (11, 15, 36):
@@ -334,12 +335,12 @@ if "--stills" in sys.argv:
     sys.exit(0)
 
 ff = subprocess.Popen(["nice", "-n", "15", "ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
-                       "-r", str(FPS), "-i", "-", "-itsoffset", str(T0 + INTRO), "-i", str(A / "track.wav"),
+                       "-r", str(FPS), "-i", "-", "-ss", str(T0), "-i", str(A / "track.wav"),   # sound from the first frame
                        "-af", "volume=5dB,alimiter=limit=0.89:attack=3:release=60:level=false",
                        "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
                        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-shortest", str(OUT)], stdin=subprocess.PIPE)
 for f in range(total_frames):
-    im = intro_frame(f) if f < INTRO_F else frame(f - INTRO_F)
+    im = intro_frame(f) if f < INTRO_F else frame(F0 + f)
     since_cut = min((f - c for c in cut_frames if c <= f), default=99)
     if since_cut < 3: im = tear(im, 1.0 - since_cut / 3)
     arr = np.asarray(im, dtype=np.uint8).astype(np.float32)

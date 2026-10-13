@@ -14,10 +14,10 @@ from PIL import Image
 HERE = Path(__file__).resolve().parent
 OBV = HERE.parent
 HOST = OBV / "build" / "host" / "obervave"
-BPM, T0 = 94, 4200                                    # the splash takes 2.4 s, then the tempo is dialled in; music at T0
+BPM, T0 = 94, 9000                                    # splash 2.4 s, the tempo dialled in, the drums' steps set; music at T0
 BEAT = 60000 / BPM
 BARS = 44                                             # 40 and the last chord's tail
-END = T0 + int(BARS * 4 * BEAT) + 2500
+END = T0 + int(BARS * 4 * BEAT) + 15000                 # the plates ring out under the end card (4 bars + 3 s in make_video)
 DEVICE_TEMPO = 120                                    # what the firmware starts with (its settings): the arp and the
                                                       # delay run on it, so every part dials the song's tempo in first
 
@@ -65,6 +65,30 @@ class Part:
     def btn(self, t, b): self.ev.append((t, f"btn {BTN[b] if isinstance(b, str) else b}"))
     def btns(self, t, *names):                        # presses 50 ms apart
         for i, b in enumerate(names): self.btn(t + 50 * i, b)
+    def hold(self, t0, t1, b):                        # a button held from t0 to t1 (a layer)
+        self.ev.append((t0, f"btndown {BTN[b]}")); self.ev.append((t1, f"btnup {BTN[b]}"))
+    def keys(self, t, mask): self.ev.append((t, f"keys {mask:#x}"))
+    def program_steps(self, t, note, div_turn, len_turn, steps):
+        """the step sequencer, by hand: a note played (the pen), SEQ held: DIV and LENGTH turned, then each step pressed
+        (an empty step is set with the pen at once) with its knobs turned while it is held: (step, level, gate)"""
+        WK = [0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26]
+        self.ev.append((t, f"midi 0x90 {note} 60")); self.ev.append((t + 30, f"midi 0x80 {note} 0"))
+        t += 100
+        t_seq = t
+        t += 60
+        for i in range(abs(div_turn)): self.enc(t, "K2", 1 if div_turn > 0 else -1); t += 25
+        for i in range(abs(len_turn)): self.enc(t, "K4", 1 if len_turn > 0 else -1); t += 25
+        for step, level, gate in steps:
+            self.keys(t, 1 << WK[step]); t += 40
+            for i in range(abs(level)): self.enc(t, "K2", 1 if level > 0 else -1); t += 20
+            for i in range(abs(gate)): self.enc(t, "K4", 1 if gate > 0 else -1); t += 12
+            self.keys(t, 0); t += 40
+        self.hold(t_seq, t + 20, "SEQ")
+        return t + 40
+    def glo_key(self, t, step):                        # GLO held, a white key (1 / 2: mute A / B)
+        WK = [0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26]
+        self.ev.append((t, f"btndown {BTN['GLO']}")); self.keys(t + 8, 1 << WK[step]); self.keys(t + 14, 0)
+        self.ev.append((t + 20, f"btnup {BTN['GLO']}"))
     def enc(self, t, e, n): self.ev.append((t, f"enc {ENC[e] if isinstance(e, str) else e} {n}"))
     def turn(self, t0, t1, e, detents):               # a knob turned `detents` (signed) between t0 and t1, a detent a step
         n = abs(detents)
@@ -200,24 +224,24 @@ clap.setup(PROG["INIT"], MODE=3, O1_WAVE=0, O2_WAVE=0, NOISE=127, FTYPE=2, CUTOF
 hat = P("hat")
 hat.setup(PROG["INIT"], oct=1, MODE=3, O1_WAVE=0, O2_WAVE=0, NOISE=127, FTYPE=1, CUTOFF=116, RESO=20, FENV_AMT=64,
           FA=0, AA=0, AD=50, AS=70, AR=60, KEYTRK=0, VEL_AMP=90, VINTAGE=0, SPREAD=0, VOLUME=95)
-for bar in range(4, 40):
-    drums_on = not (24 <= bar < 28) and bar < 38
-    if drums_on:
-        for beat in range(4):
-            kick.note(bar, beat, 36, 118 if beat in (0, 2) else 110, .5)
-    if bar >= 8 and drums_on:
-        for beat in (1, 3):
-            for k in range(3): clap.note(bar, beat + k * 0.04, 60, 100 + k * 8, .25)   # the flam of a clap
-        for i in range(8):
-            open_ = i % 2 == 1
-            hat.note(bar, i * .5, 70, 100 if open_ else 55, .42 if open_ else .1)
-        if bar % 8 == 7: hat.note(bar, 3.75, 70, 90, .3)
-    if bar == 27:                                     # the breakdown's end: a clap roll into the drop
-        for i in range(8): clap.note(bar, 2 + i * .25, 60, 70 + i * 7, .15)
-    if bar == 23:
-        for i in range(4): clap.note(bar, 2 + i * .5, 60, 85 + i * 10, .2)
+# kick and hats are OberVave's own step sequencer, programmed by hand before the music (SEQ held, the keys as steps):
+# kick 4 quarters (1 3 HARD, 2 4 NORM, half-beat gates), hats 8 eighths (closed SOFT and short, open NORM and long).
+# PLAY starts them on bar 4 / 8; GLO + key 1 mutes them for the breakdown; PLAY stops them at bar 38.
+kick.program_steps(3600, 36, -3, -12, [(0, 1, -16), (1, 0, -16), (2, 1, -16), (3, 0, -16)])
+hat.program_steps(3600, 70, -2, -8, [(k, -1 if k % 2 == 0 else 0, -35 if k % 2 == 0 else 6) for k in range(8)])
+for d, start in ((kick, 4), (hat, 8)):
+    d.btn(T0 - 200, "SEQ")                            # the sequencer's page on their screens
+    d.btn(d.at(start) - 2, "PLAY")
+    d.glo_key(d.at(24) - 40, 0)
+    d.glo_key(d.at(28) - 40, 0)
+    d.btn(d.at(38) - 10, "PLAY")
+for bar in range(8, 38):
+    if 24 <= bar < 28: continue
+    for beat in (1, 3):
+        for k in range(3): clap.note(bar, beat + k * 0.04, 60, 100 + k * 8, .25)   # the flam of a clap
+for i in range(8): clap.note(27, 2 + i * .25, 60, 70 + i * 7, .15)   # the breakdown's end: a clap roll into the drop
+for i in range(4): clap.note(23, 2 + i * .5, 60, 85 + i * 10, .2)
 kick.note(40, 0, 36, 120, .5); clap.note(40, 0, 60, 110, .25)
-hat.btns(T0 - 200, "ENV", "ENV")                      # AMP ENV on the hats' screen
 
 GAIN = {"arp": 3.6, "bass": 1.5, "pad": 1.1, "lead": 1.4, "arp2": 2.4, "strings": 1.0, "kick": 2.8, "clap": 4.2, "hat": 1.1}
 
