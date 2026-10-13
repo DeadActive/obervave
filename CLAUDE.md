@@ -92,11 +92,17 @@ the FM-1 comes back as a new device with a cold boot (a held note is gone; five 
 guard, so not warm resets). Host -> FM-1 MIDI works (notes play, USB audio records fine with `parecord`). Since
 17:42, the first minute of OberVave on the device (keys send MIDI out too). Not the CPU load (idle, effects off:
 the same), not the LCD, not the descriptors (EP 0x81 bulk 64, EP 0x84 iso 196, total length right). The USB code
-and HAL are byte for byte sloopDX 3.4+'s; zp12 (FM-1_971, worked here) has FELUCCA_UAC 0 and no 48 kHz. Suspects:
-the USB audio (EP4 iso) together with EP1 IN in the SIE / DMA, or the 48 kHz variant. Plan: the user boots the
-rescue (OCT- alone held while switching on; it skips audio, app and TIMER5); if the identity answers there,
-install a build with `FELUCCA_UAC 0` first, then bisect (UAC with 44.1 only, UAC on). Do not poll the running
-OberVave with `--info` while the user tries the rescue: each poll reboots it.
+and HAL are byte for byte sloopDX 3.4+'s; zp12 (FM-1_971, worked here) has FELUCCA_UAC 0 and no 48 kHz. Not the USB audio either: a build with FELUCCA_UAC 0 (bcdDevice 3.00, MIDI
+only) babbles the same. The Felucca update loader (same usb.c, polled, interrupts off) and zp12 (usb_poll every
+0.5 ms from TIMER5, also nested in the audio ISR) send fine; OberVave/Dinghy's platform defers usb_poll while
+in_audio ("owed"). Next suspect: that deferral (try zp12's way), then the main loop / DMA timing.
+**The way back on (worked 2026-10-13 20:20):** send the UBOOT key (F0 22 24 35 7D F7, host -> FM-1 works) -> the
+mask ROM's "WL80UBOOT1.00" (USB mass storage, /dev/sg0, root) -> jl-uboot-tool's wl82loader.bin (MIT tool,
+JieLi blob, at 0x01C02000, arg 0x0001: SPI NOR) -> its LoaderV2 reads / erases / writes flash (read_id answers one
+byte late: 0x008560) -> compare the app area 0x4000..0x93000 with the old package's (tools/fm1pkg_make.py
+flash_image, key 0x980F), write only the sectors that differ, verify each, run_app. Our Felucca loader started
+straight from the ROM cannot read the flash (SPI0 not set up: it stops after 2 requests); started from the helper
+loader the chip resets. The rescue key (OCT-) read nothing: FM1_SETTLE_US raised to 100 us (untested).
 
 Third session added the effects (chorus / delay / plate reverb, three FX pages), the SEM filter morph, the dark
 arpeggio programs (01 DARK ARP, 26 UPSIDE ARP, 29 NEON PAD; BRASS STAB moved to 13) with effects on most of the

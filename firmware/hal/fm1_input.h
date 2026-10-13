@@ -56,7 +56,9 @@
 #endif
 #define FM1_DEB_PRESS 2u          /* frames closed in a row: a press (a frame = 11 ticks, ~1.1 ms) */
 #define FM1_DEB_RELEASE 8u        /* frames open in a row: a release (~9 ms) */
+#ifndef FM1_SETTLE_US
 #define FM1_SETTLE_US 10u
+#endif
 #define FM1_REST_FRAMES 900u      /* ~1 s still off the detent state: that is the detent (power-on) */
 #define FM1_NCOL 11u
 #define FM1_NKEY 41u              /* ids: 0..13 buttons, 14..40 note keys */
