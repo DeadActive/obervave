@@ -94,6 +94,10 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 ## Status (2026-10-13, third session)
 
+Released: **1.2.1** (FM-1_952, docs/firmware, tag v1.2.1, on the hub; 1.2 replaced: a held function button's knobs
+went to the GLOBAL page's settings). The hub reads the newest package in docs/firmware via the GitHub API from the
+Pi (`~/docker/sloopdx-site/update.sh`); 60 calls an hour without a token, so a sync can hit the limit.
+
 Later on 2026-10-13: **the step sequencer** (two tracks, 256 steps, chords, ratchets, chance, step + live record,
 8 patterns), host-tested (timing 1/16 at 120 BPM checked in the WAV, screens filmed), device build passes. **Not
 on the device**: updates from the running OberVave fail (the FM-1 stops answering after the first read request,
