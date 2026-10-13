@@ -143,4 +143,4 @@ Priorities from the user: **the audio engine first, the look second**. Max depth
 
 As Dinghy / SLOOP: C99, 4 spaces, short comments that say why, unity build. Commit messages: one line what changed.
 Commit after each tested step. Host test before every device build: listen to / look at `build/host/*`.
-Not on GitHub yet: ask the user before creating the public repo.
+On GitHub: <https://github.com/zvenson/obervave> (public, since 2026-10-13). Push after each tested step.
