@@ -4,6 +4,7 @@
  *
  *   obv_dsp.h       oscillators (polyBLEP events), filter (trapezoidal SVF), tanh
  *   obv_params.h    the parameter table: patches, pages, MIDI CC
+ *   obv_fx.h        chorus, ping-pong delay, plate reverb (after the voices, same ISR)
  *   obv_engine.h    the voices, envelopes, LFO, arpeggiator: all in the audio ISR
  *   obv_patches.h   the factory programs
  *   this file       the panel, MIDI, the screen, the storage
@@ -12,6 +13,7 @@
 #include "platform.c"
 #include "obv_dsp.h"
 #include "obv_params.h"
+#include "obv_fx.h"
 #include "obv_engine.h"
 #include "obv_patches.h"
 
@@ -27,7 +29,7 @@ static void app_audio(int32_t *out, uint32_t n)
 }
 
 /* ---- what survives a power-off: the user programs and the globals, one settings sector */
-#define SET_VERSION 1u
+#define SET_VERSION 2u                          /* 2: 80-byte patches (the effects) */
 static struct {
     uint8_t version, prog, tempo, midi_ch;      /* midi_ch 0 = omni, else 1..16 */
     int8_t tune, oct, pad[2];
@@ -93,7 +95,8 @@ static void randomize(void)
     live.v[P_CUTOFF] = (uint8_t)rn(30, 110);
     live.v[P_RESO] = (uint8_t)rn(0, 90);
     live.v[P_FENV_AMT] = (uint8_t)rn(60, 120);
-    live.v[P_FTYPE] = (uint8_t)(rn(0, 2) ? F_LP24 : rn(0, 4));
+    live.v[P_FTYPE] = (uint8_t)(rn(0, 2) ? F_LP24 : rn(0, NFTYPE - 1));
+    live.v[P_FMORPH] = (uint8_t)rn(0, 127);
     live.v[P_DRIVE] = (uint8_t)(rn(0, 2) ? 0 : rn(10, 70));
     live.v[P_FA] = (uint8_t)rn(0, 90); live.v[P_FD] = (uint8_t)rn(30, 100); live.v[P_FS] = (uint8_t)rn(0, 100); live.v[P_FR] = (uint8_t)rn(20, 100);
     live.v[P_AA] = (uint8_t)rn(0, 80); live.v[P_AD] = (uint8_t)rn(30, 100); live.v[P_AS] = (uint8_t)rn(0, 127); live.v[P_AR] = (uint8_t)rn(20, 100);
@@ -111,6 +114,12 @@ static void randomize(void)
     live.v[P_GLIDE] = (uint8_t)(live.v[P_MODE] >= M_UNISON && rn(0, 1) ? rn(5, 40) : 0);
     live.v[P_VINTAGE] = (uint8_t)rn(0, 100);
     live.v[P_SPREAD] = (uint8_t)rn(20, 127);
+    live.v[P_CHO_MIX] = (uint8_t)(rn(0, 2) ? 0 : rn(30, 100));
+    live.v[P_DLY_TIME] = (uint8_t)rn(0, NDDIV - 1);
+    live.v[P_DLY_FB] = (uint8_t)rn(20, 80);
+    live.v[P_DLY_MIX] = (uint8_t)(rn(0, 1) ? 0 : rn(20, 70));
+    live.v[P_REV_SIZE] = (uint8_t)rn(40, 127);
+    live.v[P_REV_MIX] = (uint8_t)(rn(0, 3) ? rn(15, 60) : 0);
     edited = 1;
 }
 
@@ -144,13 +153,18 @@ static void param_value(char *s, uint32_t p, uint32_t v)   /* <= 7 characters */
     case K_BIP: if (v < 64u) { scat(s, "-"); fmt_u(t, 64u - v); } else { scat(s, v > 64u ? "+" : ""); fmt_u(t, v - 64u); } scat(s, t); break;
     case K_ONOFF: scat(s, v ? "ON" : "OFF"); break;
     case K_WAVE: scat(s, WAVE_NAME[v & 3u]); break;
-    case K_FTYPE: scat(s, FTYPE_NAME[v % 5u]); break;
+    case K_FTYPE: scat(s, FTYPE_NAME[v % NFTYPE]); break;
     case K_MODE: scat(s, MODE_NAME[v & 3u]); break;
     case K_LSHAPE: scat(s, LSHAPE_NAME[v % 6u]); break;
     case K_LPHASE: scat(s, LPHASE_NAME[v % 3u]); break;
     case K_TO: scat(s, TO_NAME[v % 3u]); break;
     case K_ARP: scat(s, ARP_NAME[v % NARPMODE]); break;
     case K_DIV: scat(s, DIV_NAME[v % NDIV]); break;
+    case K_DDIV: scat(s, DDIV_NAME[v % NDDIV]); break;
+    case K_MORPH:                               /* LP64 .. NOTCH .. HP63 */
+        if (v == 64u) scat(s, "NOTCH");
+        else { scat(s, v < 64u ? "LP " : "HP "); fmt_u(t, v < 64u ? 64u - v : v - 64u); scat(s, t); }
+        break;
     case K_SEMI: if (v < 24u) { scat(s, "-"); fmt_u(t, 24u - v); } else { scat(s, v > 24u ? "+" : ""); fmt_u(t, v - 24u); } scat(s, t); break;
     case K_MS:
         if (p == P_GLIDE) { if (!v) scat(s, "OFF"); else { fmt_u(s, GLIDE_MS[v & 127u]); scat(s, "ms"); } }
@@ -179,8 +193,9 @@ static void draw_header(void)
     }
     scat(tags, MODE_NAME[live.v[P_MODE] & 3u]);
     scat(tags, " ");
-    scat(tags, FTYPE_NAME[live.v[P_FTYPE] % 5u]);
+    scat(tags, FTYPE_NAME[live.v[P_FTYPE] % NFTYPE]);
     if (live.v[P_ARP_MODE]) scat(tags, " ARP");
+    if (live.v[P_CHO_MIX] || live.v[P_DLY_MIX] || live.v[P_REV_MIX]) scat(tags, " FX");
     if (hold) scat(tags, " HOLD");
     ui_header(prog, live.v + NPARAM, edited, tags);
 }
@@ -207,7 +222,7 @@ static void draw_page(void)
             k[i].label = PDEF[p].name;
             k[i].v = live.v[p];
             k[i].max = PDEF[p].max;
-            k[i].bip = PDEF[p].kind == K_BIP || PDEF[p].kind == K_SEMI;
+            k[i].bip = PDEF[p].kind == K_BIP || PDEF[p].kind == K_SEMI || PDEF[p].kind == K_MORPH;
             k[i].present = 1;
             param_value(k[i].value, (uint32_t)p, (uint32_t)live.v[p]);
         }
@@ -277,8 +292,8 @@ static void app_main(void)
         if (b & (1u << BTN_EDIT)) np = cycle_page(PG_OSC1, 5);
         if (b & (1u << BTN_ENV)) np = cycle_page(PG_FENV, 2);
         if (b & (1u << BTN_LFO)) np = cycle_page(PG_LFO, 3);
-        if (b & (1u << BTN_FX)) np = cycle_page(PG_VOICE, 2);
-        if (b & (1u << BTN_GLO)) np = PG_GLOBAL;
+        if (b & (1u << BTN_FX)) np = cycle_page(PG_CHORUS, 3);
+        if (b & (1u << BTN_GLO)) np = page == PG_GLOBAL ? PG_VOICE : page == PG_VOICE ? PG_OUTPUT : PG_GLOBAL;
         if (b & (1u << BTN_ARP)) {
             static uint32_t arp_last = A_UP;
             if (page == PG_ARP) {               /* on its page the button is the switch */
@@ -337,7 +352,7 @@ static void app_main(void)
             } else if (p >= 0) {
                 int32_t step = PDEF[p].max >= 100 ? 2 : 1;
                 set_param((uint32_t)p, (int32_t)live.v[p] + e * step);
-                if (p == P_MODE || p == P_FTYPE || p == P_ARP_MODE) dirty_tags = 1;
+                if (p == P_MODE || p == P_FTYPE || p == P_ARP_MODE || p >= P_CHO_RATE) dirty_tags = 1;
                 dirty_hdr = 1;
             }
             dirty_page = 1;
@@ -400,8 +415,8 @@ static void app_main(void)
         fm1_led_key(BTN_EDIT, page >= PG_OSC1 && page <= PG_FILTER2);
         fm1_led_key(BTN_ENV, page == PG_FENV || page == PG_AENV);
         fm1_led_key(BTN_LFO, page >= PG_LFO && page <= PG_LFO2);
-        fm1_led_key(BTN_FX, page == PG_VOICE || page == PG_OUTPUT);
-        fm1_led_key(BTN_GLO, page == PG_GLOBAL);
+        fm1_led_key(BTN_FX, page >= PG_CHORUS && page <= PG_REVERB);
+        fm1_led_key(BTN_GLO, page >= PG_VOICE && page <= PG_GLOBAL);
         fm1_led_key(BTN_SAVE, save_armed);
 
         /* the screen: only what changed */

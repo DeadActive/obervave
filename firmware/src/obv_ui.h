@@ -1,23 +1,24 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* The screen: an own design (no copied trade dress). A charcoal panel, cream legends, a red LED program number
- * drawn as 7-segment digits, "OBERVAVE" with 80s stripe bands through the lower half of the letters, four
- * anti-aliased round knobs with an amber value arc, a scope strip, eight round voice LEDs. 240 x 240:
+/* The screen: an own design (no copied trade dress). A blue-black panel with light blue legends, as the classic
+ * American polys had them, a red LED program number drawn as 7-segment digits, "OBERVAVE" with three blue bands
+ * through the lower half of the letters, four anti-aliased round knobs with a blue value arc, a scope strip, eight
+ * round voice LEDs. 240 x 240:
  *   0..43    header: program number, name, tags, the logo
  *   46..143  the page: title between rules, four knobs (label above, value below)
  *   146..195 the scope
  *   200..236 the voice LEDs */
-#define C_PANEL RGB(30, 30, 33)
-#define C_CREAM RGB(236, 226, 198)
-#define C_AMBER RGB(255, 170, 40)
+#define C_PANEL RGB(14, 18, 28)                 /* blue-black */
+#define C_CREAM RGB(226, 232, 240)              /* the legends: near white, a little cold */
+#define C_AMBER RGB(96, 176, 255)               /* the accent: the light blue of the originals' silkscreen */
 #define C_RED RGB(255, 44, 32)
 #define C_RED_DIM RGB(62, 18, 14)
-#define C_DIMT RGB(132, 124, 108)
-#define C_RULE RGB(74, 70, 64)
-#define C_KNOB RGB(58, 58, 62)
-#define C_KNOB_HI RGB(96, 96, 102)
-#define C_SCOPE_BG RGB(36, 24, 12)
-#define C_SCOPE_MID RGB(72, 48, 22)
-static const uint16_t STRIPE[3] = {RGB(230, 40, 30), RGB(245, 120, 30), RGB(255, 190, 50)};
+#define C_DIMT RGB(120, 142, 172)
+#define C_RULE RGB(48, 60, 84)
+#define C_KNOB RGB(38, 44, 56)
+#define C_KNOB_HI RGB(84, 96, 118)
+#define C_SCOPE_BG RGB(8, 12, 22)
+#define C_SCOPE_MID RGB(28, 40, 64)
+static const uint16_t STRIPE[3] = {RGB(30, 70, 190), RGB(60, 130, 235), RGB(120, 190, 255)};
 
 /* a * (1 - t) + b * t for RGB565, t = 0..256 */
 static uint16_t blend565(uint16_t a, uint16_t b, uint32_t t)
@@ -130,7 +131,7 @@ static void cv_stripes(int32_t y0, int32_t band, int32_t gap, int32_t x_to, int3
         for (y = y0 + b * (band + gap); y < y0 + b * (band + gap) + band; y++)
             for (x = 0; x < (int32_t)cv_w; x++) {
                 uint16_t c = cv_get(x, y);
-                uint32_t g = (c >> 5) & 63u, is_text = c != C_PANEL && c != C_BLACK && g > 4u;
+                uint32_t g = (c >> 5) & 63u, is_text = c != C_PANEL && c != C_BLACK && g > 14u;   /* brighter than the panel */
                 if (text_only) {
                     if (is_text) cv_pset(x, y, blend565(C_PANEL, STRIPE[b], g * 256u / 63u));
                 } else if (x < x_to)
@@ -216,7 +217,7 @@ static void ui_splash(void)
             cv_text(x0, 10, &FONT_L, "OBERVAVE", C_CREAM);
         cv_stripes(10 + 16, 4, 1, x_to, 0);
         if (k >= 14u) {
-            const char *s = "8-VOICE ANALOG POLY";
+            const char *s = "8-VOICE ANALOG POLY + FX";
             cv_text((240 - text_w(&FONT_S, s)) / 2, 66, &FONT_S, s, C_DIMT);
         }
         cv_blit(0, 76);

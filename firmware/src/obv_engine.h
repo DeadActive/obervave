@@ -382,7 +382,7 @@ static void lfo_tick(void)
 
 /* ---- one control block for a voice: pitch, cutoff, envelopes, amp */
 static int32_t fenv_amt, keytrk, velflt, lfo_pd, lfo_fd, lfo_pwd, lfo_ad, wheel_q, bend8, env_o2, det_fine8;
-static int32_t lvl1, lvl2, lvln, drive_q12, reso_k, vint, sus_f, sus_a, vol_q12;
+static int32_t lvl1, lvl2, lvln, drive_q12, reso_k, vint, sus_f, sus_a, vol_q12, morph_q;
 static uint32_t pw1_base, pw2_base, w1, w2, ftype, sync_on, xmod_q, glide_k;
 
 static void block_globals(void)                 /* the patch's derived numbers, once per block */
@@ -414,6 +414,7 @@ static void block_globals(void)                 /* the patch's derived numbers, 
     w1 = live.v[P_O1_WAVE];
     w2 = live.v[P_O2_WAVE];
     ftype = live.v[P_FTYPE];
+    morph_q = live.v[P_FMORPH];                  /* SEM: 0 LP, 64 notch, 127 HP */
     sync_on = live.v[P_SYNC];
     d = live.v[P_XMOD]; xmod_q = (uint32_t)((d * d) >> 7);
     glide_k = GLIDE_K[live.v[P_GLIDE]];
@@ -518,6 +519,7 @@ static void voice_render(voice_t *v, int32_t *out)
         case F_HP12: y = hp; break;
         case F_BP12: y = bp; break;
         case F_NOTCH: y = hp + lp; break;
+        case F_SEM: y = lp + (((hp - lp) * morph_q) >> 7); break;   /* the SEM's LP .. notch .. HP pot */
         default: y = svf_lp(&v->c2, &v->f2, lp); break;
         }
         y = clampi(y, -65000, 65000);
@@ -534,6 +536,7 @@ static void engine_audio(int32_t *out, uint32_t n)
     uint32_t b, v, i;
     static int32_t sc_prev;
     static uint32_t sc_i, sc_sub;
+    fx_block(&live, ctl_ext_quarter ? ctl_ext_quarter : 60u * FS / clampi(ctl_tempo, 40, 240));
     for (b = 0; b < n; b += CTL) {
         engine_events();
         arp_tick();
@@ -563,6 +566,7 @@ static void engine_audio(int32_t *out, uint32_t n)
         }
         sc_prev = m;
     }
+    fx_process(out, n);
 }
 
 static int engine_quiet(void)                   /* nothing sounds: a flash erase is safe */
@@ -584,4 +588,5 @@ static void engine_init(void)
     }
     lfo_rnd_a = xorshift(&rnd_state);
     lfo_rnd_b = xorshift(&rnd_state);
+    fx_init();
 }

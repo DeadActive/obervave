@@ -9,7 +9,9 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 - Nothing from SLOOP / sloopDX / zp12 apps (no sequencer, no grooves, no other engines). Only this one synth,
   as deep as possible. Dinghy's platform (`platform.c`, `usb.c`, `ota.c`, hal/) stays as it is.
 - No trademarks in the product: never "Oberheim", "OB-X", "OB-8" on screen, in patch names or in the release name.
-  In docs only as "inspired by"; the marks belong to their owners. No artist or song names in patch names.
+  In docs only as "inspired by"; the marks belong to their owners. No artist or song names in patch names. The same
+  for "Stranger Things" (Netflix): the user wants that series' dark-arpeggio sound (its theme was played on an
+  Oberheim Two Voice, so this synth's family), the name stays OberVave, and the show is never named in the product.
 - Keep the Felucca / SLOOP / Dinghy credits (LICENSING.md, README).
 - Target: JieLi AC791N, no FPU, no libgcc: integers only, **no 64-bit division** (int64 multiply is fine),
   no constant in 0xFFC00000-0xFFD00000 (`tools/build.py` checks). RAM <= 96 KB, big buffers in `.pool`.
@@ -19,8 +21,17 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 ## Where things are
 
 - `firmware/src/obervave.c`: the app (panel, MIDI, storage, what to draw when). Includes `platform.c` first, then
-  `obv_dsp.h` (oscillators, SVF, tanh), `obv_params.h` (the parameter table, pages), `obv_engine.h` (voices,
-  envelopes, LFO, arp: the ISR), `obv_patches.h` (32 factory programs), `obv_ui.h` (the drawing).
+  `obv_dsp.h` (oscillators, SVF, tanh), `obv_params.h` (the parameter table, pages), `obv_fx.h` (chorus, ping-pong
+  delay, plate reverb: after the voices in the ISR), `obv_engine.h` (voices, envelopes, LFO, arp: the ISR),
+  `obv_patches.h` (32 factory programs), `obv_ui.h` (the drawing).
+- Effects (`obv_fx.h`): all lines int16 in `.pool` (274 KB used of 336). Chorus: one line, two taps a quarter turn
+  apart, 4-point Hermite reads. Delay: two 743 ms lines, ping-pong, time in note values of the tempo (1/16 .. 1/2,
+  dotted, triplet), the read position slews like a tape when the time changes, a one-pole in the feedback (TONE).
+  Reverb: Dattorro's plate (1997) at the full rate, two swaying allpasses in the tank, SIZE = decay 0.37 .. 0.96,
+  DAMP, PRE-DLY up to 120 ms; `REV_DIV 2` compiles it at half the rate if the chip needs it (untested on the
+  device). Host cost (instr/sample): chorus ~160, delay ~110, reverb ~550; worst case with all three ~2350.
+  **The user's priority is maximum sound quality over CPU**: measure on the device before trading any of it.
+- Filter type SEM (`F_SEM`): the 12 dB SVF's LP .. notch .. HP by MORPH (FILTER + page, knob 4), as the SEM's pot.
 - `tools/gen_tables.py` -> `firmware/gen/obv_tables.h` (committed): pitch, SVF g, tanh, envelope / LFO / glide
   coefficients, pan, cos.
 - `tests/host.c` + `tests/run_host.sh [script]`: the same app on the PC (WAV + screen PNGs, scripted keys /
@@ -31,20 +42,26 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   the GLOBAL page shows the render time in us (budget 5800, aim < 2900).
 - MIDI CC: 74 cutoff, 71 reso, 73 amp attack, 72 amp release, 5 glide, 1 mod depth (the wheel and the knob are one
   value), 7 volume, 64 sustain, 120/123 all off; every other parameter from CC 20 up in table order, skipping 64
-  (`cc_map_init`). Program change picks the program.
-- The video: `video/song.py` (nine OberVaves from the host build, A minor 108 BPM, 32 bars; stems/, f/<part>/
-  frames + logs, track.wav) and `video/make_video.py` -> `video/obervave-1.0.mp4`. The renders are git-ignored.
+  and the fixed ones (`cc_map_init`): the first 50 parameters take 20..63 and 65 (ARP GATE), the appended ones
+  66 MORPH, 67-69 chorus, 70 delay time, 75-77 delay, 78-81 reverb. Program change picks the program. New
+  parameters go at the end of the table so these numbers stay.
+- The video: `video/song.py` (nine OberVaves from the host build, E minor 100 BPM, 32 bars of dark arpeggios,
+  echoes and plate; stems/, f/<part>/ frames + logs, track.wav) and `video/make_video.py` -> `video/obervave-1.1.mp4`.
+  The renders are git-ignored. The host's splash takes 1.2 s: a script's first key must come after it (T0 = 2 s).
 - `tools/build.py`: `./build.sh [--release X.Y]` -> `build/obervave[-X.Y].fwsc`, identity FM-1_95Y.
 - Docs from Dinghy: docs/API.md (platform calls), docs/RULES.md (the chip), docs/MAKE-IT-YOURS.md.
 - Workspace file: `../obervave.code-workspace` (opened in VSCodium Insiders, flatpak).
 
-## Status (2026-10-12, second session)
+## Status (2026-10-13, third session)
 
-Engine, patches, controls and the look below are built and host-tested; the device package builds
-(`build/obervave.fwsc`, ~100 KB image, 21 KB RAM) but has **not been run on an FM-1 yet**: first thing next time,
-install it, check the CPU meter (GLO page), the knobs' feel (step 2 per detent on 0..127 parameters, x3 on fast
-turns), and the splash. Open: a device CPU measurement, the look's polish (knob shading, the LEDs' glow), MIDI
-clock sync is tempo-following only (24 clocks measured in the main loop), the arp steps on 16-frame blocks.
+Third session added the effects (chorus / delay / plate reverb, three FX pages), the SEM filter morph, the dark
+arpeggio programs (01 DARK ARP, 26 UPSIDE ARP, 29 NEON PAD; BRASS STAB moved to 13) with effects on most of the
+others, the blue look, and the second video. Patches are 80 bytes (`SET_VERSION` 2). Host-tested; the device
+package builds (103 KB image, 21 KB RAM, 274 KB pool) but has **still not been run on an FM-1**: first thing next
+time, install it, check the CPU meter (GLO page) with DARK ARP and with all three effects on a big patch, the
+knobs' feel, the splash. If the render time is over ~4000 us, `REV_DIV 2` (half-rate reverb) is the first lever;
+ask the user before taking any quality away. Open: the look's polish, MIDI clock is tempo-following only, the arp
+steps on 16-frame blocks, the delay time does not follow an external clock's tempo changes smoothly.
 
 ## Plan (agreed in the first session, 2026-10-12)
 
@@ -96,20 +113,22 @@ Priorities from the user: **the audio engine first, the look second**. Max depth
 ### Controls
 
 - PRESETS = program, ALGORITHM = CUTOFF (always), SELECT = page scroll, KNOB 1-4 = the page's four parameters.
-- HOME = PERFORM (RESO, F.ENV AMT, A.RELEASE, MOD DEPTH). EDIT cycles OSC1 / OSC2 / OSC MOD / FILTER, ENV cycles
-  FILTER ENV / AMP ENV, LFO cycles LFO / LFO DEST, FX = VOICE (mode, unison detune, glide, vintage) / OUTPUT
-  (spread, vel>amp, bend, volume), ARP = arp on/off + its page, GLO = TEMPO, MIDI CH, TUNE, CPU meter.
+- HOME = PERFORM (RESO, F.ENV AMT, A.RELEASE, MOD DEPTH). EDIT cycles OSC1 / OSC2 / OSC MOD / FILTER / FILTER +,
+  ENV cycles FILTER ENV / AMP ENV, LFO cycles LFO / LFO DEST / LFO +, FX cycles CHORUS / DELAY / REVERB,
+  ARP = arp on/off + its page, GLO cycles GLOBAL (TEMPO, MIDI CH, TUNE, CPU meter) / VOICE (mode, unison, glide) /
+  OUTPUT (vintage, spread, bend, volume).
 - PLAY = HOLD (latch / sustain), SEQ = UNISON quick toggle, REC = randomize (in useful ranges), SAVE = save
   (twice to confirm, PRESETS picks the slot), OCT- / OCT+ = octave. Key LEDs show sounding notes, page buttons lit.
 
 ### Look (240 x 240)
 
-- Own design, no copied trade dress: charcoal panel, cream legends, red LED 7-segment program number (lit and dim
-  segments, drawn with rects), "OBERVAVE" in FONT_L with 80s stripe bands (red / orange / amber) through the lower
-  half of the letters, section titles between thin rules like a silkscreen.
-- 4 anti-aliased round knobs (coverage by distance, blended RGB565) with an amber value arc and a pointer, label
-  above, value below. A scope strip (amber trace on dark brown). 8 round voice LEDs glowing with each voice's
-  amp envelope, tags for mode (POLY/DUAL/UNI/MONO), filter (12/24), ARP, HOLD.
+- Own design, no copied trade dress, in the colours of the originals (the user: "the Oberheim is blue"): blue-black
+  panel, near-white legends, light blue accent, red LED 7-segment program number (lit and dim segments, drawn with
+  rects), "OBERVAVE" in FONT_L with three blue bands through the lower half of the letters, section titles between
+  thin rules like a silkscreen.
+- 4 anti-aliased round knobs (coverage by distance, blended RGB565) with a blue value arc and a pointer, label
+  above, value below. A scope strip (blue trace on near black). 8 round red voice LEDs glowing with each voice's
+  amp envelope, tags for mode (POLY/DUAL/UNI/MONO), filter type, ARP, HOLD, FX.
 - Splash at boot (~1.2 s): the stripes sweep in. Redraw only what changed; scope + LEDs ~20-25 fps.
   Raise `CV_MAX` (canvas in .pool) for bigger strips.
 
