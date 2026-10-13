@@ -14,7 +14,7 @@ from PIL import Image
 HERE = Path(__file__).resolve().parent
 OBV = HERE.parent
 HOST = OBV / "build" / "host" / "obervave"
-BPM, T0 = 94, 3000                                    # the splash takes 1.2 s, then the tempo is dialled in; music at T0
+BPM, T0 = 94, 4200                                    # the splash takes 2.4 s, then the tempo is dialled in; music at T0
 BEAT = 60000 / BPM
 BARS = 44                                             # 40 and the last chord's tail
 END = T0 + int(BARS * 4 * BEAT) + 2500
@@ -78,9 +78,9 @@ class Part:
             b = int(round(b0 + (b1 - b0) * i / n)) + 8192
             self.ev.append((t0 + i * step_ms, f"midi 0xE0 {b & 127} {b >> 7}"))
     def setup(self, prog, oct=0, **params):           # after the splash: the tempo on the GLO page, the program, its tweaks
-        t = 1250
+        t = 2500
         self.btn(t, "GLO")
-        self.turn(t + 60, t + 60 + 25 * abs(BPM - DEVICE_TEMPO), "K1", BPM - DEVICE_TEMPO)   # done by ~1.95 s
+        self.turn(t + 60, t + 60 + 25 * abs(BPM - DEVICE_TEMPO), "K1", BPM - DEVICE_TEMPO)   # done by ~3.2 s
         t = T0 - 700
         self.pc(t, prog)
         if params: self.set(t + 10, **params)

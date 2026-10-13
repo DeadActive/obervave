@@ -37,7 +37,7 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 - The logo: `tools/make_logo.py` -> `assets/logo*.svg|png` (red glowing serif outlines, three blue bands through the
   letters; `logo_svg()` draws it with parameters). `--splash` -> `firmware/gen/obv_splash.h` (committed): the boot
   screen, 240 x 49, two layers (letters; letters + bands) RLE over one RGB565 palette, ~31 KB; `ui_splash` strikes
-  it like a neon tube (flicker), sweeps the bands in, fades the line under it in, 1.2 s. Pillow's quantizer + the
+  it like a neon tube (flicker), sweeps the bands in, fades the line under it in, 2.4 s. Pillow's quantizer + the
   panel colour snapped to C_PANEL so the background is seamless.
 - Installing on the FM-1: `python3 tools/fm1_install.py build/obervave.fwsc --yes` (USB-MIDI, ~3 min, `--info`
   shows the identity). Works from SLOOP (FM-1_971) and from OberVave itself.
@@ -60,8 +60,8 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   flicker, holds, the bands sweep in, `INTRO`) -> `video/obervave-1.1.mp4`. The renders are git-ignored.
   **The arp and the delay run on the device tempo (settings, 120 BPM at first boot), not on the script's grid**:
   every part dials the song's tempo in on the GLO page first (`Part.setup`), or the arpeggio restarts off the beat
-  at every chord change (that was the "springt am Anfang" of 1.1's first cut). The host's splash takes 1.2 s: a
-  script's first key must come after it (T0 = 3 s here, the tempo turn takes until ~2 s).
+  at every chord change (that was the "springt am Anfang" of 1.1's first cut). The host's splash takes 2.4 s: a
+  script's first key must come after it (T0 = 4.2 s here, the tempo turn runs 2.5 .. 3.2 s).
 - `tools/build.py`: `./build.sh [--release X.Y]` -> `build/obervave[-X.Y].fwsc`, identity FM-1_95Y.
 - Docs from Dinghy: docs/API.md (platform calls), docs/RULES.md (the chip), docs/MAKE-IT-YOURS.md.
 - Workspace file: `../obervave.code-workspace` (opened in VSCodium Insiders, flatpak).
@@ -144,7 +144,7 @@ Priorities from the user: **the audio engine first, the look second**. Max depth
 - 4 anti-aliased round knobs (coverage by distance, blended RGB565) with a blue value arc and a pointer, label
   above, value below. A scope strip (blue trace on near black). 8 round red voice LEDs glowing with each voice's
   amp envelope, tags for mode (POLY/DUAL/UNI/MONO), filter type, ARP, HOLD, FX.
-- Splash at boot (~1.2 s): the stripes sweep in. Redraw only what changed; scope + LEDs ~20-25 fps.
+- Splash at boot (~2.4 s): the logo. Redraw only what changed; scope + LEDs ~20-25 fps.
   Raise `CV_MAX` (canvas in .pool) for bigger strips.
 
 ## Style

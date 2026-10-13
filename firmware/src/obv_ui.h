@@ -206,7 +206,7 @@ static void ui_leds(const volatile int32_t *level, uint32_t n)
 
 /* the splash: the logo (firmware/gen/obv_splash.h, from tools/make_logo.py --splash). The glowing letters strike
  * like a neon tube (a few flickers, then full), the three bands sweep in from the left, the line under it fades in.
- * ~1.2 s, polls meanwhile. Both layers are RLE over one palette; they are read in step, pixel by pixel */
+ * ~2.4 s, polls meanwhile. Both layers are RLE over one palette; they are read in step, pixel by pixel */
 #include "obv_splash.h"
 #define SPLASH_Y 70
 static void splash_frame(uint32_t fade, int32_t x_to, uint32_t sub)
@@ -224,9 +224,11 @@ static void splash_frame(uint32_t fade, int32_t x_to, uint32_t sub)
             cv_px[y * 240u + x] = swap16(fade >= 256u ? c : blend565(C_PANEL, c, fade));
         if (++x == SPLASH_W) { x = 0; y++; }
     }
-    if (sub) {
-        const char *t = "8-VOICE ANALOG POLY + FX";
-        cv_text((240 - text_w(&FONT_S, t)) / 2, SPLASH_H + 16, &FONT_S, t, sub >= 256u ? C_DIMT : blend565(C_PANEL, C_DIMT, sub));
+    if (sub) {                                      /* the line under the logo, as in assets/logo.png, in two rows */
+        const char *t1 = "8-VOICE ANALOG POLY", *t2 = "M-VAVE FM-1";
+        uint16_t c = sub >= 256u ? C_AMBER : blend565(C_PANEL, C_AMBER, sub);
+        cv_text((240 - text_w(&FONT_S, t1)) / 2, SPLASH_H + 14, &FONT_S, t1, c);
+        cv_text((240 - text_w(&FONT_S, t2)) / 2, SPLASH_H + 28, &FONT_S, t2, c);
     }
     cv_blit(0, SPLASH_Y);
 }
@@ -243,6 +245,6 @@ static void ui_splash(void)
         splash_frame(fade, x_to, sub);
         while (fm1_ms - t0 < 40u * (k + 1u)) platform_poll();
     }
-    while (fm1_ms - t0 < 1200u) platform_poll();
+    while (fm1_ms - t0 < 2400u) platform_poll();     /* it stands for a while: 2.4 s from power-on */
     lcd_fill(0, 0, 240, 240, C_PANEL);
 }
