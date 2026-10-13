@@ -71,8 +71,14 @@ static line_t cho, dl, dr, rv_pre, rv_in[4], rv_ap1, rv_d1, rv_ap2, rv_d2, rv_ap
 static uint32_t cho_ph, cho_inc, rv_ph1, rv_ph2;
 static int32_t cho_depth_k, cho_mix, dly_mix, rev_mix, dly_fb, dly_tone_k, rev_decay, rev_damp_k;
 static int32_t dly_time, dly_cur;               /* Q16 samples: the target and where the read is (it slews like a tape) */
-static int32_t dly_lpl, dly_lpr, rv_lp_in, rv_lpl, rv_lpr, rv_yl, rv_yr, rv_hold;
-static uint32_t rev_pre_n = 1, dly_active, rev_active, fx_odd;
+static int32_t dly_lpl, dly_lpr, rv_lp_in, rv_lpl, rv_lpr, rv_yl, rv_yr;
+#if REV_DIV == 2u
+static int32_t rv_hold;
+#endif
+static uint32_t rev_pre_n = 1, dly_active, rev_active;
+#if REV_DIV == 2u
+static uint32_t fx_odd;
+#endif
 
 static void fx_init(void)
 {

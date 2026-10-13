@@ -383,6 +383,7 @@ static void lfo_tick(void)
 /* ---- one control block for a voice: pitch, cutoff, envelopes, amp */
 static int32_t fenv_amt, keytrk, velflt, lfo_pd, lfo_fd, lfo_pwd, lfo_ad, wheel_q, bend8, env_o2, det_fine8;
 static int32_t lvl1, lvl2, lvln, drive_q12, reso_k, vint, sus_f, sus_a, vol_q12, morph_q;
+static int32_t cut_sm, reso_sm;              /* CUTOFF and RESO slewed (Q8), ~25 ms: a CC sweep in semitone steps glides */
 static uint32_t pw1_base, pw2_base, w1, w2, ftype, sync_on, xmod_q, glide_k;
 
 static void block_globals(void)                 /* the patch's derived numbers, once per block */
@@ -403,7 +404,9 @@ static void block_globals(void)                 /* the patch's derived numbers, 
     d = live.v[P_O2_LVL]; lvl2 = (d * d) >> 7;
     d = live.v[P_NOISE]; lvln = (d * d) >> 7;
     d = live.v[P_DRIVE]; drive_q12 = d ? 4096 + (d * d * 7 * 4096 / 16129) : 0;
-    reso_k = 8192 - live.v[P_RESO] * 8400 / 127;
+    cut_sm += ((live.v[P_CUTOFF] << 8) - cut_sm) >> 6;   /* tau = 64 blocks = 23 ms */
+    reso_sm += ((live.v[P_RESO] << 8) - reso_sm) >> 6;
+    reso_k = 8192 - reso_sm * 8400 / (127 * 256);
     vint = live.v[P_VINTAGE];
     sus_f = live.v[P_FS] * (ENV_ONE / 127);
     sus_a = live.v[P_AS] * (ENV_ONE / 127);
@@ -471,7 +474,7 @@ static void voice_block(voice_t *v, uint32_t card)
     v->pw1 = pw_mod(pw1_base, live.v[P_LFO_PWM_TO] != TO_O2 ? tmp : 0);
     v->pw2 = pw_mod(pw2_base, live.v[P_LFO_PWM_TO] != TO_O1 ? tmp : 0);
     /* cutoff, Q8 semitones */
-    cut = ((int32_t)live.v[P_CUTOFF] + 8) * 256 + ((fenv * fenv_amt * 390) >> 15)
+    cut = cut_sm + 8 * 256 + ((fenv * fenv_amt * 390) >> 15)
         + ((int32_t)v->note - 60) * keytrk * 2 + (((int32_t)v->vel - 64) * velflt >> 1)
         + ((lfo * lfo_fd * 97) >> 15) + ((lfo * wheel_q * 48) >> 15) + ((VINT_CUT8[card] * vint) >> 7);
     svf_coef(&v->c1, cut, reso_k);
