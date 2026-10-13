@@ -33,14 +33,16 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   straight into `voice_trigger` / `voice_release(n, 1)` (not through the arp). 8 patterns, one flash sector each
   at 0xF4000.. (`blob_load/save` in platform.c, `FL_RANGE_OK` widened; the host keeps them in RAM); `set.pat` is
   the current one. Saves wait for the sequencer to stop and the voices to be quiet (the erase stalls the audio).
-  Panel (reworked three times on 2026-10-13; the user knows SLOOP / sloopDX and wants it to play like that; asked
-  to repair this one rather than port sloopDX's): SEQ is a layer as in sloopDX (seq_layer: held = white keys are
-  steps, let go = notes; HOME while held locks it, SEQ unlocks; a plain tap shows PG_SEQ, keys stay notes). In the
-  layer: tap = set / clear, hold + knob = PITCH / GATE / RATCHET / CHANCE, hold a step + tap a later one = one long
-  note (ties), OCT- / OCT+ page, F#3 G#3 track, D#4 mute, F#4 G#4 pattern. REC = live recording on top (REC_READY:
-  the first note starts; held notes become ties; with the arp on, what the arp plays is recorded, via arp_q), REC
-  held 2 s clears the track, EDIT held + key erases, EDIT + OCT- undo, PLAY flashes on the beat. Patterns start
-  empty (no factory patterns). HOLD stays on the ARP button on the ARP page; the dice SAVE held + SELECT.
+  Panel = sloopDX's (the user: "die Tastaturbefehle wie bei sloopDX, sonst nützt das keiner"; repair, not a port):
+  a function button tapped (let go untouched, < 600 ms) opens its pages, held it is a layer (`layer`: L_SEQ steps,
+  L_EDIT erase + SHIFT / LENGTH x2,1/2 / TRANSPOSE knobs + OCT undo/redo, L_GLO keys 1/2 mute, 5/6 solo, G5 tap
+  tempo, L_SAVE keys 1-8 pattern (+ SEL pressed: dice), L_FX the effects' mixes); HOME while held locks it, its
+  button (or ENV/LFO/ARP, a page change) lets it go. SEQ layer: empty step pressed = set at once with the pen chord
+  (the last notes struck together), a set one pressed and let go = cleared, hold + knob NOTE / LEVEL / RATCHET /
+  GATE, hold + a later step = a long note, black keys F#3..A#4 = page 1-8, OCT page; no step held NOTE (the pen) /
+  DIV / SWING / LENGTH; set steps lit, playhead inverts, keys 1 5 9 13 glow. ALGORITHM = track A/B, SELECT =
+  tempo, OCT both = octave 0, PERFORM = CUTOFF RESO ENV AMT RELEASE. REC / PLAY / REC held 2 s as before; patterns
+  start empty; REC with the arp records the arp's notes. HOLD stays on the ARP button on its page.
 - Effects (`obv_fx.h`): all lines int16 in `.pool` (274 KB used of 336). Chorus: one line, two taps a quarter turn
   apart, 4-point Hermite reads. Delay: two 743 ms lines, ping-pong, time in note values of the tempo (1/16 .. 1/2,
   dotted, triplet), the read position slews like a tape when the time changes, a one-pole in the feedback (TONE).

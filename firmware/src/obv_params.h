@@ -128,7 +128,7 @@ enum { PG_PERFORM, PG_OSC1, PG_OSC2, PG_OSCMOD, PG_FILTER, PG_FILTER2, PG_FENV, 
        PG_LFO2, PG_ARP, PG_CHORUS, PG_DELAY, PG_REVERB, PG_VOICE, PG_OUTPUT, PG_GLOBAL,
        PG_SEQ, NPAGE };                         /* the sequencer's step view (not patch parameters: drawn by hand) */
 static const page_t PAGE[NPAGE] = {
-    [PG_PERFORM] = {"PERFORM", {P_RESO, P_FENV_AMT, P_AR, P_MOD_DEPTH}},
+    [PG_PERFORM] = {"PERFORM", {P_CUTOFF, P_RESO, P_FENV_AMT, P_AR}},   /* (ALGORITHM picks the track now, as sloopDX) */
     [PG_OSC1] = {"OSC 1", {P_O1_WAVE, P_O1_PW, P_O1_LVL, P_NOISE}},
     [PG_OSC2] = {"OSC 2", {P_O2_WAVE, P_O2_PW, P_O2_LVL, P_O2_SEMI}},
     [PG_OSCMOD] = {"OSC MOD", {P_SYNC, P_XMOD, P_ENV_O2, P_O2_FINE}},

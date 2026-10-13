@@ -46,26 +46,24 @@ Integers only: the chip has no FPU. The whole engine is fixed point, the tables 
 
 ## The panel
 
-- **PRESETS** picks the program, **ALGORITHM** is always CUTOFF, **SELECT** scrolls the pages, **KNOB 1-4** are the page's
-  four parameters. The MASTER knob is the volume.
-- **HOME**: PERFORM (resonance, envelope amount, release, mod depth). **EDIT** cycles OSC 1 / OSC 2 / OSC MOD / FILTER /
-  FILTER +. **ENV**: FILTER ENV / AMP ENV. **LFO**: LFO / LFO DEST / LFO +. **FX**: CHORUS / DELAY / REVERB.
-  **ARP**: the arp page (MODE switches it off); on it, the button is HOLD (latch / sustain). **GLO**: GLOBAL (tempo,
-  MIDI channel, tune, CPU meter) / VOICE / OUTPUT.
-- **PLAY** starts from step 1 and stops; its light flashes on the beat. **REC** while it plays records at once,
-  on top of what is there (chords stay chords, a held note becomes a long one, each note lands on the step
-  nearest to when you heard it); REC again stops recording. REC while stopped arms it: your first note starts the
-  loop. **REC held 2 s** clears the track (a bar fills on the screen). **EDIT held + a key** erases that note
-  (playing: wherever the playhead passes while you hold it; stopped: from the whole track). **EDIT held + OCT-**:
-  undo (again: redo).
-- **SEQ is a layer**, as in sloopDX: **hold SEQ** and the 16 white keys are steps 1-16 of the page (glowing: a note
-  there, bright: playing now); let go and they play notes again (SEQ held + HOME keeps it, SEQ ends it; SEQ tapped
-  shows the sequencer page). In the layer: **tap** a step: set ones are cleared, empty ones get the last note you
-  played. **Hold** a step and turn a knob: its PITCH, GATE (up to TIE), RATCHET, CHANCE. **Hold a step and tap a
-  later one**: one long note from the first to the second. **OCT- / OCT+** page, F#3 / G#3 track A / B, D#4 mute,
-  F#4 / G#4 pattern. Patterns start empty. With the arp on, REC records what the arp plays.
-- **SAVE** twice = save the program, or on a sequencer page the pattern (written once the sequencer stops).
-  **SAVE held + SELECT** pressed = a random sound. **OCT- / OCT+** = octave.
+The panel works as sloopDX's: **tap** a function button (press and let go, touching nothing else) and its pages
+open; **hold** it and it is a **layer**: the white keys and the knobs change job until you let go. **HOME** tapped
+while a layer is held locks it open; its button lets it go.
+
+| Hold | Keys | KNOB 1 · 2 · 3 · 4 | Tap |
+| --- | --- | --- | --- |
+| **SEQ** | steps 1-16 of the page (tap: set with the last note or chord / clear; hold + a later step: one long note); black keys F#3 .. A#4: page 1-8 | NOTE · DIV · SWING · LENGTH; a step held: NOTE · LEVEL · RATCHET · GATE | the sequencer page |
+| **EDIT** | erase that note (playing: as the playhead passes) | SHIFT · LENGTH x2 / 1/2 · TRANSPOSE | OSC / FILTER pages |
+| **GLO** | 1 / 2 mute track A / B, 5 / 6 solo, G5 tap tempo | - | GLOBAL / VOICE / OUTPUT |
+| **SAVE** | 1-8: pattern 1-8 (with SELECT pressed: a random sound) | - | twice: save the program (on the sequencer page: the pattern) |
+| **FX** | notes | CHORUS · DELAY · REVERB mix · DELAY TIME | CHORUS / DELAY / REVERB |
+
+- **PLAY** start / stop (the light flashes on the beat). **REC** playing: record now on top (chords, held notes
+  long) / stop; stopped: armed, the first note starts. **REC held 2 s** clears the track. **EDIT + OCT- / OCT+**
+  undo / redo.
+- **ALGORITHM** picks the track (A / B), **SELECT** is the tempo, **PRESETS** the program, **OCT- / OCT+** the
+  octave (both: back to 0). **HOME** PERFORM (CUTOFF, RESO, ENV AMT, RELEASE). **ENV**, **LFO** their pages.
+  **ARP** the arp page; on it the ARP button is HOLD (latch).
 - The key LEDs show the notes that sound, the page buttons light for the page you are on, the eight round LEDs on
   the screen glow with each voice's envelope.
 
