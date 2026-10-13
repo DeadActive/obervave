@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""OberVave video (1920 x 1080, 30 fps, ~75 s): nine OberVaves play one track (song.py: the real firmware's
+"""OberVave video (1920 x 1080, 30 fps, ~95 s): nine OberVaves play one track (song.py: the real firmware's
 host build, its screens filmed at 30 fps, its audio). The part in focus left on a drawn FM-1 (screen, knobs, buttons,
-keys lit as the firmware lights them), what happens right; bars 24-28 all of them at once; the end card.
+keys lit as the firmware lights them), what happens right; bars 28-32 all of them at once; the end card.
   python3 song.py && python3 make_video.py [--stills]"""
 import math, subprocess, sys
 from pathlib import Path
@@ -10,13 +10,13 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 HERE = Path(__file__).resolve().parent
 A = HERE
-OUT = HERE / "obervave-1.0.mp4"
+OUT = HERE / "obervave-1.1.mp4"
 W, H, FPS = 1920, 1080, 30
-BPM, T0 = 108, 2.0
+BPM, T0 = 100, 2.0
 BAR = 4 * 60 / BPM
-BG, BG2, PANEL = (26, 26, 30), (36, 36, 41), (46, 46, 52)
-CREAM, DIM, AMBER, RED = (236, 226, 198), (150, 142, 128), (255, 170, 40), (255, 44, 32)
-STRIPES = [(230, 40, 30), (245, 120, 30), (255, 190, 50)]
+BG, BG2, PANEL = (14, 18, 28), (22, 28, 42), (34, 40, 56)                  # blue-black, as the firmware's screen
+CREAM, DIM, AMBER, RED = (226, 232, 240), (120, 142, 172), (96, 176, 255), (255, 44, 32)
+STRIPES = [(30, 70, 190), (60, 130, 235), (120, 190, 255)]
 IF = "/run/host/fonts/rsms-inter-fonts/"
 def font(n, s): return ImageFont.truetype(IF + n, int(s))
 F_LIGHT = lambda s: font("InterDisplay-Light.ttf", s)
@@ -24,7 +24,7 @@ F_BOLD = lambda s: font("InterDisplay-Bold.ttf", s)
 F_REG = lambda s: font("Inter-Regular.ttf", s)
 F_SEMI = lambda s: font("Inter-SemiBold.ttf", s)
 
-PARTS = ["pad", "arp", "bass", "brass", "lead", "strings"]
+PARTS = ["arp", "bass", "pad", "lead", "arp2", "strings"]
 LOG = {p: [tuple(int(x) for x in l.split()) for l in open(A / "f" / f"{p}-log.txt")] for p in PARTS}   # ms, keys, key LEDs, btn LEDs, enc x7
 NF = min(len(v) for v in LOG.values())
 BLACKPC = {1, 3, 6, 8, 10}
@@ -47,9 +47,9 @@ def base():
     d = ImageDraw.Draw(im)
     d.rectangle([0, 0, W, 96], fill=BG2)
     d.text((60, 28), "OberVave", font=F_BOLD(40), fill=CREAM)
-    d.text((60 + d.textlength("OberVave ", font=F_BOLD(40)), 40), "an 8-voice analog-style poly for the M-VAVE FM-1", font=F_REG(24), fill=DIM)
+    d.text((60 + d.textlength("OberVave ", font=F_BOLD(40)), 40), "an 8-voice analog-style poly with chorus, delay and plate reverb, for the M-VAVE FM-1", font=F_REG(24), fill=DIM)
     stripes(d, W - 380, W - 60, 36)
-    d.rectangle([0, H - 8, W, H], fill=(60, 56, 50))
+    d.rectangle([0, H - 8, W, H], fill=(40, 60, 110))
     return im
 
 def screen(part, f, scale=3, pad=None):
@@ -134,15 +134,15 @@ def caption(im, kicker, title, body, x=1010, y=180, width=840):
 
 # ---- the sections, by bar
 SECTIONS = [
-    (0, 4, "pad", "OberVave", "An 8-voice analog-style polysynth", "Two oscillators a voice, saw and pulse, hard sync and cross-modulation. A 12 or 24 dB filter, two envelopes, an LFO, an arpeggiator. Free firmware for the M-VAVE FM-1, built on Dinghy."),
-    (4, 8, "bass", "1 of 6 · the bass", "Phat mono bass", "FAT BASS: a saw and a pulse an octave below it, into the 24 dB filter with drive. Last-note priority, glide between the notes. RESO goes up a little in bar 4."),
-    (8, 12, "brass", "2 of 6 · brass", "Brass stabs, the filter envelope", "BRASS STAB: two saws, slightly detuned, eight voices. The filter envelope snaps the cutoff open on every hit. ENV AMT is turned down, then back up."),
-    (12, 16, "lead", "3 of 6 · sync lead", "OSC 2 hard-synced to OSC 1", "SYNC LEAD: the filter envelope sweeps OSC 2's pitch while it is synced: the classic tearing lead. CUTOFF rides on the ALGORITHM knob."),
-    (16, 20, "strings", "4 of 6 · strings", "PWM strings", "PWM STRING: pulse waves, the LFO sways their width, every voice with its own LFO phase, panned left and right. Under it the arpeggiator keeps running: UP/DOWN, 1/16, two octaves."),
-    (20, 24, "lead", "5 of 6 · unison", "Six voices on one key", "UNISON LD: six detuned voices, spread across the stereo field, with glide. The pitch bend at the end of the phrase comes in over MIDI."),
-    (24, 28, "all", "6 of 6 · all of them", "Nine OberVaves at once", "Every part is the same firmware, nine FM-1s, one voice of the arrangement each. The drums too: a kick from the resonant filter ringing, a snare and hats from noise through the band-pass and high-pass."),
+    (0, 8, "arp", "OberVave", "8 voices, analog style, with effects", "DARK ARP: a four-note chord climbed in 16ths, two saws a hair apart, the 24 dB filter half shut, a dotted-eighth ping-pong and a long dark plate. Free firmware for the FM-1."),
+    (8, 12, "bass", "1 of 6 · the bass", "Mono bass under the arpeggio", "FAT BASS: a saw and a pulse an octave below it, 24 dB filter with drive, last-note priority and glide. Whole notes first, eighth-note pulses from bar 12."),
+    (12, 16, "pad", "2 of 6 · the pad", "A pulse-width pad through chorus and plate", "NEON PAD: pulse waves, the LFO sways their width with a different phase for every voice. A slow chorus widens it, a dotted-quarter echo and the plate carry it."),
+    (16, 20, "lead", "3 of 6 · the lead", "A square lead, its echoes in the tempo", "SQUARE LD: two pulses, mono with glide and a little drive. The ping-pong delay runs in note values of the tempo; here an eighth, feeding back softly. DELAY is one of the three FX pages."),
+    (20, 24, "arp2", "4 of 6 · a second arpeggio", "The SEM filter: lowpass to notch to highpass", "UPSIDE ARP: up and down over two octaves above the chord, through the 12 dB SEM-style filter. MORPH turns it from lowpass toward the notch: the sound hollows out."),
+    (24, 28, "strings", "5 of 6 · strings", "PWM strings high above", "PWM STRING: pulse-width modulation, every voice its own LFO phase, panned left and right, through the plate. The bass opens its filter underneath."),
+    (28, 32, "all", "6 of 6 · all of them", "Nine OberVaves at once", "Every part is the same firmware, nine FM-1s, one voice of the arrangement each. The drums too: a kick from the resonant filter ringing, a snare with reverb and hats from noise."),
 ]
-END_BAR = 28
+END_BAR = 32
 
 def frame(f):
     b = bar_of(f)
@@ -150,7 +150,7 @@ def frame(f):
     im = base()
     d = ImageDraw.Draw(im)
     if sec is None:                                                           # the end card
-        part = "pad"
+        part = "arp"
         ms, keys, lit, btn, *enc = LOG[part][min(f, NF - 1)]
         shadow_paste(im, screen(part, f, 2), (150, 220))
         d.text((1010, 230), "OberVave", font=F_BOLD(120), fill=CREAM)
@@ -163,18 +163,18 @@ def frame(f):
         y = 712
         for ln in ("OberVave: free firmware, GPL-3.0. Built on Dinghy, SLOOP 2.3 (isod89) and Felucca (Hügelton Instruments).",
                    "Inspired by the classic 8-voice poly synths of 1979-84 (trademarks of their owners, no affiliation).",
-                   "All sounds: OberVave on the FM-1, nine of them. Please always check the latest firmware version!"):
+                   "All sounds: OberVave on the FM-1, nine of them, chorus, delay and reverb included. Please always check the latest firmware version!"):
             for l2 in wrap(d, ln, F_REG(20), 840):
                 d.text((1016, y), l2, font=F_REG(20), fill=DIM); y += 25
         keyboard(im, 1016, 890, 700, lit)
         return im
     b0, b1, part, kicker, title, body = sec
     if part == "all":
-        for i, p in enumerate(("bass", "brass", "lead", "pad")):
+        for i, p in enumerate(("arp", "bass", "lead", "pad")):
             shadow_paste(im, screen(p, f, 2, 8), (70 + (i % 2) * 510, 104 + (i // 2) * 470))
         caption(im, kicker, title, body, x=1100, y=180, width=760)
-        d.text((1100, 640), "bass · brass · lead · pad", font=F_SEMI(26), fill=AMBER)
-        d.text((1100, 680), "+ arp · strings · kick · snare · hats", font=F_REG(26), fill=DIM)
+        d.text((1100, 640), "arp · bass · lead · pad", font=F_SEMI(26), fill=AMBER)
+        d.text((1100, 680), "+ second arp · strings · kick · snare · hats", font=F_REG(26), fill=DIM)
         return im
     ms, keys, lit, btn, *enc = LOG[part][min(f, NF - 1)]
     shadow_paste(im, screen(part, f, 3), (90, 150))
@@ -182,9 +182,9 @@ def frame(f):
         d.text((1000, 150), "OberVave", font=F_BOLD(150), fill=CREAM)
         stripes(d, 1008, 1008 + 700, 326, 10, 5)
         d.text((1008, 380), title, font=F_LIGHT(54), fill=CREAM)
-        y = 460
+        y = 448
         for ln in wrap(d, body, F_REG(28), 860):
-            d.text((1008, y), ln, font=F_REG(28), fill=DIM); y += 40
+            d.text((1008, y), ln, font=F_REG(28), fill=DIM); y += 36
     else:
         caption(im, kicker, title, body, x=1000, y=140, width=860)
     panel(im, 1010, 560, btn, enc)
@@ -193,13 +193,13 @@ def frame(f):
 
 total_frames = min(NF, int((T0 + (END_BAR + 4) * BAR + 3.0) * FPS))
 if "--stills" in sys.argv:
-    for bb in (1, 5.5, 9.5, 13, 17, 21.5, 25, 30):
+    for bb in (1, 9.5, 13, 17, 21.5, 25, 29, 34):
         frame(int((T0 + bb * BAR) * FPS)).save(A / f"still-{bb}.png")
     sys.exit(0)
 
 ff = subprocess.Popen(["nice", "-n", "15", "ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
                        "-r", str(FPS), "-i", "-", "-itsoffset", str(T0), "-i", str(A / "track.wav"),
-                       "-af", "alimiter=limit=0.89:attack=3:release=60:level=false",
+                       "-af", "volume=5dB,alimiter=limit=0.89:attack=3:release=60:level=false",
                        "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
                        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-shortest", str(OUT)], stdin=subprocess.PIPE)
 for f in range(total_frames):
