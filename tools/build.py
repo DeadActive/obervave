@@ -153,6 +153,7 @@ def build_loader():
 
 def build_app():
     flags = [*APP_CFLAGS, "-Ifirmware/hal", "-Ifirmware/src", "-Ifirmware/gen", f'-DFELUCCA_ID="{PRODUCT}"', f'-DAPP_VER="{VERSION or "0.0"}"']
+    flags += os.environ.get("OBV_DEFS", "").split()   # (a test build: OBV_DEFS=-DFELUCCA_UAC=0 ./build.sh)
     cmds = [("cc", "-c", FW / "crt0.S", "-o", OUT / "crt0.o"),
             ("cc", "-c", FW / "hal" / "fm1_vec.S", "-o", OUT / "fm1_vec.o"),
             ("cc", "-c", FW / "hal" / "fm1_isr.S", "-o", OUT / "fm1_isr.o"),

@@ -62,9 +62,16 @@ static volatile uint32_t fm1_ms;                /* milliseconds since power-on (
 #define HALF_WORDS (HALF_FRAMES * 2u)
 #define FELUCCA_OTA 1
 #define FELUCCA_CDC 0
-#define FELUCCA_UAC 1
+#ifndef FELUCCA_UAC
+#define FELUCCA_UAC 1                           /* USB audio to the computer (-DFELUCCA_UAC=0: MIDI only, as zp12) */
+#endif
 #define FELUCCA_UART 0
 #include "usb.c"
+#if FELUCCA_UAC
+#define UAC_ONLY(x) x
+#else
+#define UAC_ONLY(x) ((void)0)
+#endif
 
 /* ---- flash: read anywhere; erase / program only the update's staging area and the settings sector */
 #define SETTINGS_AT 0x000FC000u                 /* one 4 KiB sector of Felucca's globals area */
@@ -218,7 +225,7 @@ void fm1_timer5_irq(void)
         sub = 0;
     if (in_audio) {
         if (usb_due)
-            uac_service();
+            UAC_ONLY(uac_service());
         return;
     }
     if (owed)
@@ -244,14 +251,14 @@ void fm1_alnk0_irq(void)                       /* via isr_alnk0 (hal/fm1_isr.S) 
         uint32_t i, b;
         for (i = 0; i < HALF_WORDS; i++)
             o[i] = 0;
-        uac_render_start();
+        UAC_ONLY(uac_render_start());
         app_audio(o, HALF_FRAMES);
         for (i = 0; i < HALF_WORDS; i++) {
             int32_t v = (o[i] * master_q12) >> 12;
             o[i] = v > 32767 ? 32767 : v < -32767 ? -32767 : v;
         }
         for (b = 0; b < HALF_FRAMES; b += 32u)
-            uac_tap(o + 2u * b, 32u);           /* the computer records what the speaker plays */
+            UAC_ONLY(uac_tap(o + 2u * b, 32u));   /* the computer records what the speaker plays */
         for (i = 0; i < HALF_WORDS; i++)
             o[i] <<= 7;
         fm1_audio_ack_half();
