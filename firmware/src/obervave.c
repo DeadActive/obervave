@@ -41,7 +41,7 @@ static struct {
 } set;
 static uint32_t set_dirty, set_t;
 
-static uint32_t prog, edited, page = PG_PERFORM, hold, save_armed, save_t, dice_armed, dice_t;
+static uint32_t prog, edited, page = PG_PERFORM, hold, save_armed, save_t;
 
 /* the sequencer, as the panel sees it */
 static uint32_t seq_trk, seq_cur[2], seq_pg[2], rec, rec_held, rec_step, pat_edited, pat_dirty, seq_back = PG_PERFORM;
@@ -345,7 +345,7 @@ static void draw_page(void)
             if (pat.trk[seq_trk].mute) scat(title, " MUTED");
             t = title;
         }
-        ui_page(t, k, save_armed ? "SAVE?" : dice_armed ? "DICE?" : is_seq_page(page) && pat_edited ? "EDITED" : 0);
+        ui_page(t, k, save_armed ? "SAVE?" : is_seq_page(page) && pat_edited ? "EDITED" : 0);
     }
 }
 
@@ -602,12 +602,11 @@ static void app_main(void)
                 np = seq_back;
             else { seq_back = page; np = PG_SEQ; }
         }
-        if (b & (1u << BTN_SEL)) {              /* the SELECT knob pressed twice: a new sound (dice) */
-            if (dice_armed) { dice_armed = 0; randomize(); dirty_hdr = dirty_tags = 1; }
-            else { dice_armed = 1; dice_t = fm1_ms; }
-            dirty_page = 1;
+        if (b & (1u << BTN_SEL) && fm1_in.buttons & (1u << BTN_SAVE)) {   /* SAVE held + SELECT: a new sound (dice) */
+            randomize();
+            save_armed = 0;
+            dirty_hdr = dirty_tags = dirty_page = 1;
         }
-        if (dice_armed && fm1_ms - dice_t > 3000u) { dice_armed = 0; dirty_page = 1; }
         if (b & (1u << BTN_SAVE)) {
             if (save_armed) {
                 if (is_seq_page(page)) pat_dirty = 1;   /* the pattern: saved once the sequencer stops and all is quiet */
@@ -779,6 +778,7 @@ static void app_main(void)
         fm1_led_key(BTN_GLO, page >= PG_VOICE && page <= PG_GLOBAL);
         fm1_led_key(BTN_SAVE, save_armed);
 
+        {
         /* the screen: only what changed */
         if (dirty_hdr && fm1_ms - t_hdr >= 30u) { dirty_hdr = 0; t_hdr = fm1_ms; draw_header(); }
         if (dirty_page && fm1_ms - t_page >= 30u) { dirty_page = 0; t_page = fm1_ms; draw_page(); }
@@ -811,6 +811,7 @@ static void app_main(void)
             draw_scope();
         }
 
+        }
         if (set_dirty && !ctl_seq_run && engine_quiet() && fm1_ms - set_t > 2000u) {   /* when silent: an erase stalls the sound */
             settings_save(&set, sizeof set);
             set_dirty = 0;

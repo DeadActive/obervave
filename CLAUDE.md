@@ -41,7 +41,7 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   track A/B, A#3 C#4 page, D#4 mute, F#4 G#4 pattern, A#4 held 1.5 s clear. The voice LEDs' strip shows hints
   (draw_hints: a toast after an action, else four rotating pairs). REC: keys are notes, recorded into seq_cur
   (stopped, chord, then on; SEQ = rest) or the nearest step (running). HOLD on the ARP button on the ARP page,
-  the random sound SELECT pressed twice, the UNISON quick toggle gone (VOICE page).
+  the random sound SAVE held + SELECT, the UNISON quick toggle gone (VOICE page).
 - Effects (`obv_fx.h`): all lines int16 in `.pool` (274 KB used of 336). Chorus: one line, two taps a quarter turn
   apart, 4-point Hermite reads. Delay: two 743 ms lines, ping-pong, time in note values of the tempo (1/16 .. 1/2,
   dotted, triplet), the read position slews like a tape when the time changes, a one-pole in the feedback (TONE).
@@ -101,8 +101,9 @@ the same), not the LCD, not the descriptors (EP 0x81 bulk 64, EP 0x84 iso 196, t
 and HAL are byte for byte sloopDX 3.4+'s; zp12 (FM-1_971, worked here) has FELUCCA_UAC 0 and no 48 kHz. Not the USB audio either: a build with FELUCCA_UAC 0 (bcdDevice 3.00, MIDI
 only) babbles the same. The Felucca update loader (same usb.c, polled, interrupts off) and zp12 (usb_poll every
 0.5 ms from TIMER5, also nested in the audio ISR) send fine; OberVave/Dinghy's platform defers usb_poll while
-in_audio ("owed"). Trying zp12's way now: MIDI-only builds poll USB every 0.5 ms, nested in a render too
-(platform.c); untested on the device until it is installed.
+in_audio ("owed"). That was not it either (tried: no change). **Found:** every build that sends fine has ep1tx at 0 mod 8 (Dinghy,
+zp12, the loader); OberVave's was at 4 mod 8 (aligned(4) only, the layout decides). usb.c now aligns all endpoint
+buffers to 32. Dinghy / sloopDX / zp12 carry the same latent bug.
 **The way back on (worked 2026-10-13 20:20):** send the UBOOT key (F0 22 24 35 7D F7, host -> FM-1 works) -> the
 mask ROM's "WL80UBOOT1.00" (USB mass storage, /dev/sg0, root) -> jl-uboot-tool's wl82loader.bin (MIT tool,
 JieLi blob, at 0x01C02000, arg 0x0001: SPI NOR) -> its LoaderV2 reads / erases / writes flash (read_id answers one
