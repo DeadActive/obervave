@@ -34,6 +34,13 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 - Filter type SEM (`F_SEM`): the 12 dB SVF's LP .. notch .. HP by MORPH (FILTER + page, knob 4), as the SEM's pot.
 - `tools/gen_tables.py` -> `firmware/gen/obv_tables.h` (committed): pitch, SVF g, tanh, envelope / LFO / glide
   coefficients, pan, cos.
+- The logo: `tools/make_logo.py` -> `assets/logo*.svg|png` (red glowing serif outlines, three blue bands through the
+  letters; `logo_svg()` draws it with parameters). `--splash` -> `firmware/gen/obv_splash.h` (committed): the boot
+  screen, 240 x 49, two layers (letters; letters + bands) RLE over one RGB565 palette, ~31 KB; `ui_splash` strikes
+  it like a neon tube (flicker), sweeps the bands in, fades the line under it in, 1.2 s. Pillow's quantizer + the
+  panel colour snapped to C_PANEL so the background is seamless.
+- Installing on the FM-1: `python3 tools/fm1_install.py build/obervave.fwsc --yes` (USB-MIDI, ~3 min, `--info`
+  shows the identity). Works from SLOOP (FM-1_971) and from OberVave itself.
 - `tests/host.c` + `tests/run_host.sh [script]`: the same app on the PC (WAV + screen PNGs, scripted keys /
   buttons / MIDI / `enc ID N` encoder turns). Film mode (`build/host/obervave OUT script FPS`) writes a frame every
   1/FPS s and `OUT-log.txt` (keys, key LEDs, button LEDs, encoder positions per frame). `OBV_PERF=1` prints the
@@ -49,7 +56,8 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   the four-note arpeggio all the way through, four on the floor, a woozy unison lead with octave dives; stems/,
   f/<part>/ frames + logs for all nine, track.wav; `--mix-only` re-sums the stems with new gains) and
   `video/make_video.py` (a shot list: focus / duo / trio / wall of nine, the kick pulses, the clap flashes, a cut
-  tears the colour planes for three frames) -> `video/obervave-1.1.mp4`. The renders are git-ignored.
+  tears the colour planes for three frames; before it a 4 s intro: the logo strikes with lightning flashes and a
+  flicker, holds, the bands sweep in, `INTRO`) -> `video/obervave-1.1.mp4`. The renders are git-ignored.
   **The arp and the delay run on the device tempo (settings, 120 BPM at first boot), not on the script's grid**:
   every part dials the song's tempo in on the GLO page first (`Part.setup`), or the arpeggio restarts off the beat
   at every chord change (that was the "springt am Anfang" of 1.1's first cut). The host's splash takes 1.2 s: a
@@ -62,11 +70,11 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 Third session added the effects (chorus / delay / plate reverb, three FX pages), the SEM filter morph, the dark
 arpeggio programs (01 DARK ARP, 26 UPSIDE ARP, 29 NEON PAD; BRASS STAB moved to 13) with effects on most of the
-others, the blue look, and the second video. Patches are 80 bytes (`SET_VERSION` 2). Host-tested; the device
-package builds (103 KB image, 21 KB RAM, 274 KB pool) but has **still not been run on an FM-1**: first thing next
-time, install it, check the CPU meter (GLO page) with DARK ARP and with all three effects on a big patch, the
-knobs' feel, the splash. If the render time is over ~4000 us, `REV_DIV 2` (half-rate reverb) is the first lever;
-ask the user before taking any quality away. CUTOFF and RESO slew ~23 ms per block (CC sweeps glide). Open: the
+others, the blue look, and the second video. Patches are 80 bytes (`SET_VERSION` 2). Later that day the package
+(112 KB image, 21 KB RAM, 274 KB pool) was **installed on the user's FM-1** (it came up as FM-1_950, the install
+and the restart worked) with the logo splash; the user still has to report the CPU meter (GLO page) with DARK ARP
+and with all three effects on a big patch, the knobs' feel, the splash. If the render time is over ~4000 us,
+`REV_DIV 2` (half-rate reverb) is the first lever; ask the user before taking any quality away. CUTOFF and RESO slew ~23 ms per block (CC sweeps glide). Open: the
 look's polish, MIDI clock is tempo-following only, the arp steps on 16-frame blocks, the delay time does not follow
 an external clock's tempo changes smoothly, a tempo CC (the video sets it with the knob).
 

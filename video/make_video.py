@@ -3,7 +3,8 @@
 """OberVave video 1.1 (1920 x 1080, 30 fps, ~110 s): nine OberVaves play one slow dark track (song.py: the real firmware's
 host build, all nine screens filmed at 30 fps, its audio). A shot list cuts between them on the bars: one in focus on a
 drawn FM-1 (screen, knobs, buttons, keys lit as the firmware lights them), two side by side, the drum trio, the wall of
-nine. The kick pulses the picture, the clap flashes it, every cut tears the colours for three frames.
+nine. The kick pulses the picture, the clap flashes it, every cut tears the colours for three frames. Before it all the
+logo (tools/make_logo.py) strikes like a neon sign in a storm: flashes, a flicker, then it holds and the bands sweep in.
   python3 song.py && python3 make_video.py [--stills]"""
 import math, subprocess, sys, wave
 from pathlib import Path
@@ -47,6 +48,60 @@ def stem_env(name):                                   # a stem's loudness per fr
     e = np.array([m[i * n:(i + 1) * n].max() if i * n < len(m) else 0 for i in range(NF)])
     return e / max(e.max(), 1e-6)
 ENV = {p: stem_env(p) for p in PARTS}
+
+def tear(im, k):                                      # a cut: the red and blue planes slip apart for a moment
+    r, g, b = im.split()
+    r = ImageChops.offset(r, int(10 * k), 0)
+    b = ImageChops.offset(b, -int(10 * k), 0)
+    return Image.merge("RGB", (r, g, b))
+
+# ---- the intro: the logo, 4 s, before the film (its own clock; the track starts after it)
+INTRO = 4.0
+INTRO_F = int(INTRO * FPS)
+sys.path.insert(0, str(HERE.parent / "tools"))
+import make_logo
+_lp, _lw = make_logo.word_paths(make_logo.FONT, make_logo.WORD, make_logo.CAP, make_logo.TRACK)
+_sub = make_logo.word_paths(make_logo.SUB_FONT, "8-VOICE ANALOG POLY  ·  M-VAVE FM-1", 22, 0.18)
+LOGO = {}
+for _name, _bands in (("letters", False), ("full", True)):               # the glowing letters; the same with the bands
+    _png = A / "f" / f"logo-{_name}.png"
+    if not _png.exists():
+        make_logo.render(make_logo.logo_svg(_lp, _lw, background=False, bands=_bands, sub=_sub), _png, 1500)
+    LOGO[_name] = Image.open(_png).convert("RGBA")
+LOGO_XY = ((W - LOGO["full"].width) // 2, (H - LOGO["full"].height) // 2 - 20)
+
+# the strike, per frame: (logo brightness 0..1, a flash of light in the room 0..1); then it holds
+STRIKE = {10: (0.12, 0), 11: (0.0, 0), 17: (1.0, 0.9), 18: (0.35, 0.2), 19: (0.0, 0), 26: (1.0, 1.0), 27: (1.0, 0.4), 28: (0.15, 0),
+          29: (0.0, 0), 34: (0.6, 0.3), 35: (0.2, 0), 36: (0.75, 0), 37: (0.5, 0), 38: (0.85, 0), 39: (0.6, 0), 40: (0.95, 0.5),
+          41: (0.8, 0), 42: (1.0, 0), 43: (0.9, 0), 44: (1.0, 0)}
+def intro_frame(f):
+    k, flash = STRIKE.get(f, (0.0, 0.0) if f < 44 else (1.0, 0.0))
+    if f >= 44 and f % 23 == 0: k = 0.86                                      # the tube hums: a dip now and then
+    bg = tuple(int(c + (t - c) * flash) for c, t in zip(BG, (62, 80, 124)))     # the room lights up cold blue
+    im = Image.new("RGB", (W, H), bg)
+    if flash > 0.5:                                                           # the lightning: a bolt down the sky
+        d = ImageDraw.Draw(im)
+        rnd = np.random.RandomState(f)
+        x, y, pts = rnd.randint(300, 1600), 0, []
+        while y < H:
+            pts.append((x, y)); x += rnd.randint(-90, 90); y += rnd.randint(40, 120)
+        d.line(pts, fill=(150, 180, 255), width=9)
+        d.line(pts, fill=(200, 215, 255), width=4)
+        d.line(pts, fill=(255, 255, 255), width=1)
+        im = im.filter(ImageFilter.GaussianBlur(1.2))
+    if k > 0:
+        t = max(0.0, min(1.0, (f - 60) / 24))                                  # the bands sweep in, 2 s .. 2.8 s
+        x_to = int(LOGO["full"].width * t * t)
+        logo = LOGO["letters"].copy()
+        if x_to:
+            logo.paste(LOGO["full"].crop((0, 0, x_to, logo.height)), (0, 0))
+        if k < 1:
+            a = logo.split()[3].point(lambda v: int(v * k))
+            logo.putalpha(a)
+        dx = int(np.random.RandomState(f).randint(-3, 4)) if k < 0.9 else 0   # it shakes while it fights
+        im.paste(logo, (LOGO_XY[0] + dx, LOGO_XY[1]), logo)
+    if flash > 0.6: im = tear(im, flash)
+    return im
 
 # ---- the drawing
 def stripes(d, x0, x1, y, h=6, gap=3):
@@ -265,34 +320,30 @@ def frame(f):
     keyboard(im, 1000, 850, 860, lit)
     return im
 
-def tear(im, k):                                      # a cut: the red and blue planes slip apart for a moment
-    r, g, b = im.split()
-    r = ImageChops.offset(r, int(10 * k), 0)
-    b = ImageChops.offset(b, -int(10 * k), 0)
-    return Image.merge("RGB", (r, g, b))
-
-total_frames = min(NF, int((T0 + (END_BAR + 4) * BAR + 3.0) * FPS))
-cut_frames = set()
+total_frames = INTRO_F + min(NF, int((T0 + (END_BAR + 4) * BAR + 3.0) * FPS))
+cut_frames = {INTRO_F}
 for s in SHOTS:
-    cut_frames.add(int((T0 + s[0] * BAR) * FPS))
-cut_frames.add(int((T0 + END_BAR * BAR) * FPS))
+    cut_frames.add(INTRO_F + int((T0 + s[0] * BAR) * FPS))
+cut_frames.add(INTRO_F + int((T0 + END_BAR * BAR) * FPS))
 
 if "--stills" in sys.argv:
     for bb in (11, 15, 36):
         frame(int((T0 + bb * BAR) * FPS)).save(A / f"still-{bb}.png")
+    for fi in (17, 26, 38, 50, 75, 110):
+        intro_frame(fi).save(A / f"still-intro-{fi}.png")
     sys.exit(0)
 
 ff = subprocess.Popen(["nice", "-n", "15", "ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
-                       "-r", str(FPS), "-i", "-", "-itsoffset", str(T0), "-i", str(A / "track.wav"),
+                       "-r", str(FPS), "-i", "-", "-itsoffset", str(T0 + INTRO), "-i", str(A / "track.wav"),
                        "-af", "volume=5dB,alimiter=limit=0.89:attack=3:release=60:level=false",
                        "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
                        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-shortest", str(OUT)], stdin=subprocess.PIPE)
 for f in range(total_frames):
-    im = frame(f)
+    im = intro_frame(f) if f < INTRO_F else frame(f - INTRO_F)
     since_cut = min((f - c for c in cut_frames if c <= f), default=99)
     if since_cut < 3: im = tear(im, 1.0 - since_cut / 3)
     arr = np.asarray(im, dtype=np.uint8).astype(np.float32)
-    k = min(1.0, (f + 1) / FPS / 0.4, (total_frames - f) / FPS / 1.2)        # fade in and out
+    k = min(1.0, (total_frames - f) / FPS / 1.2)                             # fade out at the end
     if k < 1: arr = arr * max(0.0, k)
     ff.stdin.write(arr.astype(np.uint8).tobytes())
     if f % 300 == 0: print(f"{f}/{total_frames}", file=sys.stderr)
