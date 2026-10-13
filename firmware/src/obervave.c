@@ -327,13 +327,14 @@ static void draw_header(void)
         ui_header(prog, live.v + NPARAM, edited, tags);
         return;
     }
-    {   /* short words, and what does not fit (23 characters) goes, the least important first: FX, ARP, HOLD */
+    {   /* short words; mode, filter, HOLD, SEQ and REC always (at most 23 characters: MONO NOTCH HOLD SEQ REC); then,
+         * as far as they fit, the track B, ARP, FX */
         static const char *const MODE_S[4] = {"POLY", "DUAL", "UNI", "MONO"};
         static const char *const FT_S[NFTYPE] = {"LP12", "HP12", "BP12", "NOTCH", "LP24", "SEM"};
-        uint32_t arp = live.v[P_ARP_MODE] != 0, fx = live.v[P_CHO_MIX] || live.v[P_DLY_MIX] || live.v[P_REV_MIX], hd = hold;
+        uint32_t arp = live.v[P_ARP_MODE] != 0, fx = live.v[P_CHO_MIX] || live.v[P_DLY_MIX] || live.v[P_REV_MIX], trk = seq_trk;
         uint32_t n = slen(MODE_S[live.v[P_MODE] & 3u]) + 1u + slen(FT_S[live.v[P_FTYPE] % NFTYPE])
-                   + (ctl_seq_run ? 4u : 0u) + (rec ? 4u : 0u) + (seq_trk ? 2u : 0u);
-        if (hd && n + 5u <= 23u) n += 5u; else hd = 0;
+                   + (hold ? 5u : 0u) + (ctl_seq_run ? 4u : 0u) + (rec ? 4u : 0u);
+        if (trk && n + 2u <= 23u) n += 2u; else trk = 0;
         if (arp && n + 4u <= 23u) n += 4u; else arp = 0;
         if (fx && n + 3u <= 23u) n += 3u; else fx = 0;
         scat(tags, MODE_S[live.v[P_MODE] & 3u]);
@@ -341,8 +342,8 @@ static void draw_header(void)
         scat(tags, FT_S[live.v[P_FTYPE] % NFTYPE]);
         if (arp) scat(tags, " ARP");
         if (fx) scat(tags, " FX");
-        if (hd) scat(tags, " HOLD");
-        if (seq_trk) scat(tags, " B");          /* (track B selected: A is the rest state) */
+        if (hold) scat(tags, " HOLD");
+        if (trk) scat(tags, " B");
         if (ctl_seq_run) scat(tags, " SEQ");
         if (rec) scat(tags, " REC");
     }
