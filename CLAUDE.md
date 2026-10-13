@@ -33,15 +33,16 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   straight into `voice_trigger` / `voice_release(n, 1)` (not through the arp). 8 patterns, one flash sector each
   at 0xF4000.. (`blob_load/save` in platform.c, `FL_RANGE_OK` widened; the host keeps them in RAM); `set.pat` is
   the current one. Saves wait for the sequencer to stop and the voices to be quiet (the erase stalls the audio).
-  Panel (reworked 2026-10-13, the user: "den checkt so noch keiner"): SEQ toggles the step view (PG_SEQ, the only
-  sequencer page): the 16 white keys = steps of page seq_pg (KEY_STEP), LEDs glow = note there (fm1_led_key_glow,
-  the dim layer), bright = playhead / held; tap = on/off (STEP_OFF bit in ratch, notes kept; empty gets `pen`, the
-  last played note), hold + knob = PITCH / GATE / RATCHET / CHANCE of that step (stopped: the held step sounds),
-  a held step takes a chord from MIDI; no step held: LENGTH / NOTE / SWING / TRANSP. Black keys (KEY_FN): F#3 G#3
-  track A/B, A#3 C#4 page, D#4 mute, F#4 G#4 pattern, A#4 held 1.5 s clear. The voice LEDs' strip shows hints
-  (draw_hints: a toast after an action, else four rotating pairs). REC: keys are notes, recorded into seq_cur
-  (stopped, chord, then on; SEQ = rest) or the nearest step (running). HOLD on the ARP button on the ARP page,
-  the random sound SAVE held + SELECT, the UNISON quick toggle gone (VOICE page).
+  Panel (reworked twice on 2026-10-13; the user knows SLOOP / sloopDX and wants it to play like that, and as good
+  as Baud Girl's): REC = live recording (rec REC_OFF / REC_READY / REC_ON; armed, the first note starts the loop;
+  notes added on top, nearest step minus ~12 ms, a held note's release writes its gate or ties on (rec_open);
+  per-note ties in the player, seq_tie_into), REC held 2 s clears the track (acts on release under 0.7 s), EDIT
+  held + key erases (erase_on: as the playhead passes), EDIT + OCT- undo/redo (undo_pat, one level), PLAY flashes
+  on the beat (ui_seq_beat). Step view (SEQ, PG_SEQ): white keys = steps (tap: set ones cleared, empty get `pen`),
+  hold + knob edits PITCH / GATE / RATCHET / CHANCE, OCT- / OCT+ page, black keys F#3 G#3 track, D#4 mute,
+  F#4 G#4 pattern; hints at the bottom (draw_hints, max 30 characters a line). HOLD on the ARP button on the ARP
+  page (the user found it, keep), the dice SAVE held + SELECT. Next from Baud Girl: bigger chords, locks, step
+  move/copy, pattern copy / x2 / half, pattern chain (song).
 - Effects (`obv_fx.h`): all lines int16 in `.pool` (274 KB used of 336). Chorus: one line, two taps a quarter turn
   apart, 4-point Hermite reads. Delay: two 743 ms lines, ping-pong, time in note values of the tempo (1/16 .. 1/2,
   dotted, triplet), the read position slews like a tape when the time changes, a one-pole in the feedback (TONE).

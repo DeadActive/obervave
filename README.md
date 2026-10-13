@@ -52,16 +52,18 @@ Integers only: the chip has no FPU. The whole engine is fixed point, the tables 
   FILTER +. **ENV**: FILTER ENV / AMP ENV. **LFO**: LFO / LFO DEST / LFO +. **FX**: CHORUS / DELAY / REVERB.
   **ARP**: the arp page (MODE switches it off); on it, the button is HOLD (latch / sustain). **GLO**: GLOBAL (tempo,
   MIDI channel, tune, CPU meter) / VOICE / OUTPUT.
-- **SEQ** opens the step view: the keys stop playing notes and become the sequencer (SEQ again, or any page button,
-  and they are notes again). The **16 white keys are steps 1-16** of the page shown: glowing = a note there,
-  bright = playing now. **Tap** a white key: the step on / off (an empty one gets the last note you played).
-  **Hold** a white key and turn a knob: that step's PITCH, GATE (up to TIE), RATCHET (1-4 hits), CHANCE; holding a
-  step also takes a chord from a MIDI keyboard. With no step held the knobs are the track's LENGTH, NOTE value,
-  SWING and TRANSPOSE. The **black keys**: F#3 / G#3 track A / B, A#3 / C#4 page back / on, D#4 mute,
-  F#4 / G#4 pattern back / on, A#4 held: clear the track. The bottom of the screen says what the keys do.
-- **PLAY** starts the sequencer from step 1 and stops it. **REC** records: the keys play notes again and write
-  them, chords too, into the selected step and move on (**SEQ** = a rest, **REC** again = done); while it runs they
-  land on the nearest step.
+- **PLAY** starts from step 1 and stops; its light flashes on the beat. **REC** while it plays records at once,
+  on top of what is there (chords stay chords, a held note becomes a long one, each note lands on the step
+  nearest to when you heard it); REC again stops recording. REC while stopped arms it: your first note starts the
+  loop. **REC held 2 s** clears the track (a bar fills on the screen). **EDIT held + a key** erases that note
+  (playing: wherever the playhead passes while you hold it; stopped: from the whole track). **EDIT held + OCT-**:
+  undo (again: redo).
+- **SEQ** opens the step view: the **16 white keys are steps 1-16** of the page (glowing: a note there, bright:
+  playing now). **Tap** a step: set ones are cleared, empty ones get the last note you played. **Hold** a step and
+  turn a knob: its PITCH, GATE (up to TIE), RATCHET, CHANCE (a MIDI keyboard sets its chord while you hold it). No
+  step held, the knobs are the track's LENGTH, NOTE value, SWING, TRANSPOSE. **OCT- / OCT+** page; black keys
+  F#3 / G#3 track A / B, D#4 mute, F#4 / G#4 pattern. SEQ again: the keys play notes. The screen's bottom line says
+  what the keys do.
 - **SAVE** twice = save the program, or on a sequencer page the pattern (written once the sequencer stops).
   **SAVE held + SELECT** pressed = a random sound. **OCT- / OCT+** = octave.
 - The key LEDs show the notes that sound, the page buttons light for the page you are on, the eight round LEDs on
