@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """The OberVave video's music: nine OberVaves (the real firmware's host build, firmware/src/obervave.c), each with a
-script of notes, CCs and knob turns. E minor, 100 BPM, 32 bars: dark arpeggios, echoes and a plate. Writes scripts/<part>.txt, runs the host build (tests/run_host.sh builds it)
-(the filmed parts at 30 fps: f/<part>/NNNNN.png + f/<part>-log.txt), mixes stems/*.wav into track.wav.
+script of notes, CCs, button presses and knob turns. D minor, 94 BPM, 40 bars: slow dark disco, a four-note arpeggio
+climbing all the way through, a rolling octave bass, four on the floor, a woozy lead, everything through delay and plate.
+Writes scripts/<part>.txt, runs the host build (tests/run_host.sh builds it) filmed at 30 fps (f/<part>/NNNNN.png +
+f/<part>-log.txt), mixes stems/*.wav into track.wav.
 
-  python3 song.py [--scripts-only]"""
+  python3 song.py [--scripts-only | --mix-only]"""
 import subprocess, sys, wave, shutil
 from pathlib import Path
 import numpy as np
@@ -12,18 +14,20 @@ from PIL import Image
 HERE = Path(__file__).resolve().parent
 OBV = HERE.parent
 HOST = OBV / "build" / "host" / "obervave"
-BPM, T0 = 100, 2000                                   # the splash takes 1.2 s; the music starts at T0 ms
+BPM, T0 = 94, 3000                                    # the splash takes 1.2 s, then the tempo is dialled in; music at T0
 BEAT = 60000 / BPM
-BARS = 36                                             # 32 and the last chord's tail
+BARS = 44                                             # 40 and the last chord's tail
 END = T0 + int(BARS * 4 * BEAT) + 2500
+DEVICE_TEMPO = 120                                    # what the firmware starts with (its settings): the arp and the
+                                                      # delay run on it, so every part dials the song's tempo in first
 
 PARAMS = ("O1_WAVE O1_PW O1_LVL NOISE O2_WAVE O2_PW O2_LVL O2_SEMI SYNC XMOD ENV_O2 O2_FINE CUTOFF RESO FENV_AMT KEYTRK "
           "FTYPE DRIVE VEL_FLT VEL_AMP FA FD FS FR AA AD AS AR LFO_SHAPE LFO_RATE LFO_DELAY LFO_PHASE LFO_PITCH LFO_PWM "
           "LFO_FLT LFO_AMP LFO_PITCH_TO LFO_PWM_TO MODE UNI_N UNI_DET GLIDE VINTAGE SPREAD BEND VOLUME MOD_DEPTH "
           "ARP_MODE ARP_DIV ARP_OCT ARP_GATE FMORPH CHO_RATE CHO_DEPTH CHO_MIX DLY_TIME DLY_FB DLY_TONE DLY_MIX "
           "REV_SIZE REV_DAMP REV_PRE REV_MIX").split()
-PMAX = {"O1_WAVE": 3, "O2_WAVE": 3, "O2_SEMI": 48, "SYNC": 1, "FTYPE": 4, "LFO_SHAPE": 5, "LFO_PHASE": 2, "LFO_PITCH_TO": 2,
-        "LFO_PWM_TO": 2, "MODE": 3, "UNI_N": 8, "BEND": 24, "ARP_MODE": 5, "ARP_DIV": 6, "ARP_OCT": 4, "FTYPE": 5, "DLY_TIME": 6}
+PMAX = {"O1_WAVE": 3, "O2_WAVE": 3, "O2_SEMI": 48, "SYNC": 1, "FTYPE": 5, "LFO_SHAPE": 5, "LFO_PHASE": 2, "LFO_PITCH_TO": 2,
+        "LFO_PWM_TO": 2, "MODE": 3, "UNI_N": 8, "BEND": 24, "ARP_MODE": 5, "ARP_DIV": 6, "ARP_OCT": 4, "DLY_TIME": 6}
 FIXED = {"CUTOFF": 74, "RESO": 71, "AA": 73, "AR": 72, "GLIDE": 5, "MOD_DEPTH": 1}
 CC = dict((n, c) for n, c in FIXED.items())
 nxt = 20
@@ -31,7 +35,11 @@ for n in PARAMS:
     if n in FIXED: continue
     while nxt in CC.values() or nxt == 64: nxt += 1
     CC[n] = nxt; nxt += 1
-PROG = {"DARKARP": 0, "SYNCLEAD": 2, "UNISON": 3, "PWM": 4, "FATBASS": 6, "SQUARELD": 15, "UPSIDEARP": 25, "NEONPAD": 28, "INIT": 31}
+PROG = {"DARKARP": 0, "SYNCLEAD": 2, "UNISON": 3, "PWM": 4, "FATBASS": 6, "SWEEPPAD": 8, "SQUARELD": 15, "SUBBASS": 16,
+        "UPSIDEARP": 25, "NEONPAD": 28, "INIT": 31}
+BTN = {"OCT-": 0, "OCT+": 1, "FX": 2, "SEL": 3, "ENV": 4, "LFO": 5, "EDIT": 6, "GLO": 7, "HOME": 8, "SAVE": 9, "ARP": 10,
+       "SEQ": 11, "PLAY": 12, "REC": 13}
+ENC = {"SELECT": 0, "CUTOFF": 1, "K1": 2, "K2": 3, "K3": 4, "K4": 5, "PRESETS": 6}
 
 def ccval(name, v):                                   # the CC that sets parameter `name` to v (the app scales by max)
     m = PMAX.get(name, 127)
@@ -54,8 +62,13 @@ class Part:
     def set(self, t, **kv):
         for k, v in kv.items(): self.cc(t, k, v); t += 1
     def pc(self, t, prog): self.ev.append((t, f"midi 0xC0 {prog} 0"))
-    def btn(self, t, b): self.ev.append((t, f"btn {b}"))
-    def enc(self, t, e, n): self.ev.append((t, f"enc {e} {n}"))
+    def btn(self, t, b): self.ev.append((t, f"btn {BTN[b] if isinstance(b, str) else b}"))
+    def btns(self, t, *names):                        # presses 50 ms apart
+        for i, b in enumerate(names): self.btn(t + 50 * i, b)
+    def enc(self, t, e, n): self.ev.append((t, f"enc {ENC[e] if isinstance(e, str) else e} {n}"))
+    def turn(self, t0, t1, e, detents):               # a knob turned `detents` (signed) between t0 and t1, a detent a step
+        n = abs(detents)
+        for i in range(n): self.enc(t0 + (t1 - t0) * i // max(1, n - 1), e, 1 if detents > 0 else -1)
     def sweep(self, t0, t1, name, v0, v1, step_ms=20):   # a CC ramp
         n = max(1, (t1 - t0) // step_ms)
         for i in range(n + 1): self.cc(t0 + i * step_ms, name, int(round(v0 + (v1 - v0) * i / n)))
@@ -64,6 +77,15 @@ class Part:
         for i in range(n + 1):
             b = int(round(b0 + (b1 - b0) * i / n)) + 8192
             self.ev.append((t0 + i * step_ms, f"midi 0xE0 {b & 127} {b >> 7}"))
+    def setup(self, prog, oct=0, **params):           # after the splash: the tempo on the GLO page, the program, its tweaks
+        t = 1250
+        self.btn(t, "GLO")
+        self.turn(t + 60, t + 60 + 25 * abs(BPM - DEVICE_TEMPO), "K1", BPM - DEVICE_TEMPO)   # done by ~1.95 s
+        t = T0 - 700
+        self.pc(t, prog)
+        if params: self.set(t + 10, **params)
+        for i in range(abs(oct)): self.btn(t + 100 + 50 * i, "OCT+" if oct > 0 else "OCT-")
+        self.btn(t + 400, "HOME")
     def write(self):
         self.ev.sort(key=lambda e: e[0])
         p = HERE / "scripts" / f"{self.name}.txt"
@@ -71,117 +93,133 @@ class Part:
         p.write_text("\n".join(f"{t} {s}" for t, s in self.ev) + f"\n{END} end\n")
         return p
 
-# ---- the music. E minor, four bars round and round: | Em7 | Cmaj7 | Am7 | B7 |
-EM7, CMAJ7, AM7, B7 = [52, 55, 59, 62], [48, 52, 55, 59], [45, 48, 52, 55], [47, 51, 54, 57]
-PROGRESSION = [EM7, CMAJ7, AM7, B7]
-ROOT = [28, 24, 21, 23]                                # E1 C1 A0 B0
+# ---- the music. D Phrygian over a D pedal, four bars round and round: | Dm(add9) | Dm(add9) | Ebmaj7 | C#m7 |:
+# the flat second leans on the tonic, the minor chord a half step below pulls it back. Hypnotic, never resolving.
+DM, EB, CS = [50, 53, 57, 64], [51, 55, 58, 62], [49, 52, 56, 59]
+PROGRESSION = [DM, DM, EB, CS]
+ROOT = [26, 26, 27, 25]                                # D1 D1 Eb1 C#1
 def chord_of(bar): return PROGRESSION[bar % 4]
 def root_of(bar): return ROOT[bar % 4]
 
 parts = {}
-def P(name, film=False): parts[name] = Part(name, film); return parts[name]
+def P(name, film=True): parts[name] = Part(name, film); return parts[name]
 
-# ARP: DARK ARP, the backbone: the chord held a bar, climbed in 16ths, the filter opens over 16 bars and shuts at the end
-arp = P("arp", film=True)
-arp.pc(T0 - 1500, PROG["DARKARP"]); arp.set(T0 - 1400, CUTOFF=38, VOLUME=105)
-for bar in range(0, 32):
+# ARP: DARK ARP, the backbone all 40 bars: the chord held a bar, climbed in 16ths. The filter opens over the first
+# half, all the way in the breakdown, drops shut at the drop (bar 28) and opens once more
+arp = P("arp")
+arp.setup(PROG["DARKARP"], oct=-1, CUTOFF=34, VOLUME=105, REV_MIX=55)
+for bar in range(0, 40):
     arp.chord(bar, 0, chord_of(bar), 100, 3.98)
-arp.chord(32, 0, EM7, 100, 0.98)
-arp.sweep(arp.at(0), arp.at(16), "CUTOFF", 38, 62)
-arp.sweep(arp.at(28), arp.at(32), "CUTOFF", 62, 30)
-arp.btn(T0 - 900, 0)                                  # OCT -1: the chords light the keys
-arp.btn(T0 - 800, 10)                                 # the ARP page
-arp.btn(arp.at(20) - 200, 2); arp.btn(arp.at(20) - 150, 2); arp.btn(arp.at(20) - 100, 2)   # FX x3: the REVERB page
+arp.chord(40, 0, DM, 100, 0.98)
+arp.sweep(arp.at(0), arp.at(16), "CUTOFF", 34, 56)
+arp.sweep(arp.at(24), arp.at(28), "CUTOFF", 56, 84)
+arp.cc(arp.at(28) - 10, "CUTOFF", 40)
+arp.sweep(arp.at(28), arp.at(36), "CUTOFF", 40, 62)
+arp.sweep(arp.at(38), arp.at(40), "CUTOFF", 62, 28)
+arp.btn(T0 - 200, "ARP")                              # the ARP page
+arp.btns(arp.at(24) - 200, "FX", "FX", "FX")          # the REVERB page for the breakdown
+arp.turn(arp.at(25), arp.at(27), "K4", 10)            # REV MIX up for the breakdown (and back after the drop)
+arp.turn(arp.at(29), arp.at(30), "K4", -10)
 
-# BASS: FAT BASS, the root a whole note from bar 4, eighth-note pulses from bar 12, whole notes again at the end
-bass = P("bass", film=True)
-bass.pc(T0 - 1500, PROG["FATBASS"]); bass.set(T0 - 1400, VOLUME=110, CUTOFF=34, DRIVE=45, GLIDE=8, RESO=20)
-for bar in range(4, 32):
+# BASS: FAT BASS, disco: root and octave in eighths from bar 8, whole notes in the breakdown, the glide dives at bar 36
+bass = P("bass")
+bass.setup(PROG["FATBASS"], oct=-2, VOLUME=112, CUTOFF=36, DRIVE=40, GLIDE=6, RESO=24, AR=30, DLY_MIX=0, REV_MIX=0)
+for bar in range(8, 40):
     r = root_of(bar)
-    if bar < 12 or bar >= 28:
-        bass.note(bar, 0, r, 110, 3.9)
+    if 24 <= bar < 28:
+        bass.note(bar, 0, r, 100, 3.9)
     else:
         for i in range(8):
-            bass.note(bar, i * .5, r + (12 if i in (3, 7) else 0), 105 if i % 2 == 0 else 85, .45)
-bass.note(32, 0, 28, 115, 4.0)
-bass.sweep(bass.at(24), bass.at(28), "CUTOFF", 34, 60)
-bass.sweep(bass.at(28), bass.at(29), "CUTOFF", 60, 34)
-bass.btn(T0 - 900, 0); bass.btn(T0 - 850, 0)          # OCT -2
-bass.btn(T0 - 800, 6); bass.btn(T0 - 750, 6); bass.btn(T0 - 700, 6); bass.btn(T0 - 650, 6)   # EDIT x4: FILTER
+            up = i in (1, 3, 5, 7)
+            bass.note(bar, i * .5, r + (12 if up else 0), 108 if not up else 90, .42)
+bass.note(40, 0, 26, 112, 4.0)
+bass.btns(T0 - 200, "EDIT", "EDIT", "EDIT", "EDIT")   # the FILTER page
+bass.turn(bass.at(20), bass.at(22), "K1", 16)         # RESO up over two bars, then back
+bass.turn(bass.at(22), bass.at(23), "K1", -16)
+bass.sweep(bass.at(34), bass.at(36), "CUTOFF", 36, 66)
+bass.cc(bass.at(36), "CUTOFF", 36)
 
-# PAD: NEON PAD, whole-note chords an octave up from bar 8, the last one rings out
-pad = P("pad", film=True)
-pad.pc(T0 - 1500, PROG["NEONPAD"]); pad.set(T0 - 1400, VOLUME=78, CUTOFF=48)
-for bar in range(8, 32):
-    pad.chord(bar, 0, [n + 12 for n in chord_of(bar)], 90, 4.0)
-pad.chord(32, 0, [n + 12 for n in EM7], 95, 10.0)
-pad.sweep(pad.at(24), pad.at(28), "CUTOFF", 48, 64)
-pad.btn(T0 - 800, 2)                                  # FX: the CHORUS page
+# PAD: NEON PAD, swells from bar 12, carries the breakdown, rings out at the end
+pad = P("pad")
+pad.setup(PROG["NEONPAD"], VOLUME=74, CUTOFF=46, AA=95)
+for bar in range(12, 40):
+    pad.chord(bar, 0, [n + 12 for n in chord_of(bar)], 88, 4.0)
+pad.chord(40, 0, [n + 12 for n in DM], 92, 12.0)
+pad.sweep(pad.at(24), pad.at(28), "CUTOFF", 46, 70)
+pad.cc(pad.at(28), "CUTOFF", 46)
+pad.btns(T0 - 200, "FX")                              # the CHORUS page
+pad.turn(pad.at(16), pad.at(18), "K2", 10)            # chorus DEPTH up
 
-# LEAD: SQUARE LD bars 16-24 (its echoes in the tempo), UNISON LD an octave up bars 28-32
-lead = P("lead", film=True)
-lead.pc(T0 - 1500, PROG["SQUARELD"]); lead.set(T0 - 1400, VOLUME=95, CUTOFF=66, AR=55, DLY_MIX=45, DLY_FB=45, REV_MIX=30, REV_SIZE=100)
-lead.btn(T0 - 900, 1)                                 # OCT +1
-MEL = [(0, 0, 64, 2.0), (0, 2, 67, 1.0), (0, 3, 66, 1.0), (1, 0, 62, 3.0), (1, 3, 59, 1.0),
-       (2, 0, 60, 2.0), (2, 2, 64, 1.0), (2, 3, 62, 1.0), (3, 0, 59, 4.0),
-       (4, 0, 64, 1.5), (4, 1.5, 67, .5), (4, 2, 71, 2.0), (5, 0, 69, 2.0), (5, 2, 67, 1.0), (5, 3, 66, 1.0),
-       (6, 0, 67, 1.0), (6, 1, 64, 1.0), (6, 2, 62, 2.0), (7, 0, 64, 3.5)]
+# LEAD: UNISON LD, woozy: six voices wide apart, slow glide, vintage drift, a pitch dive at the end of each phrase
+lead = P("lead")
+lead.setup(PROG["UNISON"], oct=1, VOLUME=92, CUTOFF=58, UNI_N=6, UNI_DET=70, GLIDE=38, VINTAGE=110, AA=25, AR=70, BEND=12,
+           DLY_TIME=4, DLY_FB=45, DLY_MIX=40, REV_SIZE=105, REV_MIX=40, LFO_PITCH=14, LFO_RATE=30, LFO_DELAY=40)
+MEL = [(0, 0, 62, 2.5), (0, 3, 63, 1.0), (1, 0, 65, 1.5), (1, 2, 62, 2.0), (2, 0, 63, 2.0), (2, 2.5, 60, 1.5),
+       (3, 0, 61, 4.0), (4, 0, 62, 1.0), (4, 1.5, 65, 1.0), (4, 3, 69, 1.0), (5, 0, 70, 2.0), (5, 2, 69, 2.0),
+       (6, 0, 67, 1.5), (6, 2, 63, 2.0), (7, 0, 61, 4.0)]                 # D Phrygian: the Eb, and C# under the last chord
 for b, beat, n, dur in MEL:
-    lead.note(16 + b, beat, n, 105, dur * .92)
-lead.btn(lead.at(16) - 300, 2); lead.btn(lead.at(16) - 250, 2)   # FX x2: the DELAY page
-lead.pc(lead.at(28) - 400, PROG["UNISON"]); lead.set(lead.at(28) - 380, VOLUME=90, CUTOFF=72, UNI_N=6, UNI_DET=55, DLY_MIX=35, REV_MIX=35)
-lead.btn(lead.at(28) - 300, 7); lead.btn(lead.at(28) - 250, 7)   # GLO x2: the VOICE page
-for b, beat, n, dur in MEL[:9]:
-    lead.note(28 + b, beat, n + 12, 110, dur * .95)
-lead.note(32, 0, 76, 110, 4.0)
-lead.bend(lead.at(31, 2), lead.at(31, 3.9), 0, -8192)            # the last note falls
-lead.bend(lead.at(32) - 30, lead.at(32) - 10, -8192, 0)
+    lead.note(16 + b, beat, n, 104, dur * .95)
+lead.bend(lead.at(19, 2), lead.at(19, 3.9), 0, -8192)            # the dive: an octave down (BEND 12)
+lead.bend(lead.at(20) - 60, lead.at(20) - 10, -8192, 0)
+lead.bend(lead.at(23, 1.5), lead.at(23, 3.9), 0, -8192)
+lead.bend(lead.at(24) - 60, lead.at(24) - 10, -8192, 0)
+for b, beat, n, dur in MEL:
+    lead.note(32 + b, beat, n + (12 if b >= 4 else 0), 108, dur * .95)
+lead.bend(lead.at(39, 1), lead.at(39, 3.9), 0, -8192)
+lead.bend(lead.at(40) - 60, lead.at(40) - 10, -8192, 0)
+lead.note(40, 0, 62, 100, 3.0)
+lead.bend(lead.at(40, 1.5), lead.at(40, 3), 0, -8192)
+lead.btns(T0 - 200, "GLO", "GLO")                     # the VOICE page: UNISON, 6 voices
+lead.btns(lead.at(32) - 300, "FX", "FX")              # the DELAY page the second time
 
-# ARP2: UPSIDE ARP (the SEM filter), up and down over two octaves above the chord, bars 20-28; MORPH turned LP -> notch
-arp2 = P("arp2", film=True)
-arp2.pc(T0 - 1500, PROG["UPSIDEARP"]); arp2.set(T0 - 1400, VOLUME=80, CUTOFF=36)
-for bar in range(20, 28):
+# ARP2: UPSIDE ARP, up and down two octaves above, bars 28-36 (the drop), MORPH turned LP -> notch across it
+arp2 = P("arp2")
+arp2.setup(PROG["UPSIDEARP"], VOLUME=76, CUTOFF=34, REV_MIX=60)
+for bar in range(28, 36):
     arp2.chord(bar, 0, [n + 12 for n in chord_of(bar)], 90, 3.98)
-for i in range(16): arp2.enc(arp2.at(24) + i * 100, 5, 1)         # MORPH knob (FILTER +, knob 4) toward the notch
-arp2.btn(T0 - 800, 6); arp2.btn(T0 - 750, 6); arp2.btn(T0 - 700, 6); arp2.btn(T0 - 650, 6); arp2.btn(T0 - 600, 6)   # EDIT x5: FILTER +
+arp2.btns(T0 - 200, "EDIT", "EDIT", "EDIT", "EDIT", "EDIT")   # FILTER +
+arp2.turn(arp2.at(30), arp2.at(34), "K4", 22)         # MORPH toward the notch
 
-# STRINGS: PWM STRING high above, bars 24-32, the last chord long
-strings = P("strings", film=True)
-strings.pc(T0 - 1500, PROG["PWM"]); strings.set(T0 - 1400, VOLUME=85, CUTOFF=64, AA=60, REV_MIX=45)
-for bar in range(24, 32):
+# STRINGS: PWM STRING two octaves up, bars 32-40, the last chord long
+strings = P("strings")
+strings.setup(PROG["PWM"], oct=1, VOLUME=80, CUTOFF=60, AA=70, REV_MIX=50, REV_SIZE=115)
+for bar in range(32, 40):
     strings.chord(bar, 0, [n + 24 for n in chord_of(bar)], 85, 4.0)
-strings.chord(32, 0, [n + 24 for n in EM7], 85, 10.0)
-strings.btn(T0 - 900, 1)                              # OCT +1
-strings.btn(T0 - 800, 5)                              # the LFO page (the PWM)
+strings.chord(40, 0, [n + 24 for n in DM], 85, 12.0)
+strings.btns(T0 - 200, "LFO")                         # the LFO page (the PWM)
 
-# DRUMS: three OberVaves from INIT, half time. Kick: the resonant 12 dB filter rings like a sine, the envelope drops its pitch.
+# DRUMS: three OberVaves from INIT. Kick: the resonant 12 dB filter rings like a sine, the envelope drops its pitch.
+# Clap: noise through the band-pass, four quick hits, a long plate. Hats: noise through the high-pass, open on the offbeat.
 kick = P("kick")
-kick.pc(T0 - 1500, PROG["INIT"])
-kick.set(T0 - 1400, MODE=3, O1_WAVE=1, O1_LVL=55, O2_WAVE=0, NOISE=0, FTYPE=0, CUTOFF=22, RESO=125, FENV_AMT=64 + 48,
-         FA=0, FD=64, FS=0, AA=0, AD=88, AS=0, AR=40, KEYTRK=0, VEL_FLT=0, VEL_AMP=30, DRIVE=40, VINTAGE=0, SPREAD=0, VOLUME=127, GLIDE=0)
-snare = P("snare")
-snare.pc(T0 - 1500, PROG["INIT"])
-snare.set(T0 - 1400, MODE=3, O1_WAVE=0, O2_WAVE=1, O2_LVL=50, NOISE=127, FTYPE=2, CUTOFF=70, RESO=30, FENV_AMT=64 + 24,
-          FA=0, FD=60, FS=0, AA=0, AD=80, AS=0, AR=40, KEYTRK=0, VEL_FLT=40, VEL_AMP=50, DRIVE=25, VINTAGE=0, SPREAD=0, VOLUME=120,
-          REV_SIZE=110, REV_DAMP=70, REV_MIX=45)
+kick.setup(PROG["INIT"], oct=-2, MODE=3, O1_WAVE=1, O1_LVL=55, O2_WAVE=0, NOISE=0, FTYPE=0, CUTOFF=22, RESO=125, FENV_AMT=64 + 50,
+           FA=0, FD=66, FS=0, AA=0, AD=90, AS=0, AR=40, KEYTRK=0, VEL_FLT=0, VEL_AMP=30, DRIVE=45, VINTAGE=0, SPREAD=0, VOLUME=127, GLIDE=0)
+clap = P("clap")
+clap.setup(PROG["INIT"], MODE=3, O1_WAVE=0, O2_WAVE=0, NOISE=127, FTYPE=2, CUTOFF=74, RESO=45, FENV_AMT=64 + 10,
+           FA=0, FD=50, FS=0, AA=0, AD=62, AS=0, AR=50, KEYTRK=0, VEL_FLT=30, VEL_AMP=50, DRIVE=20, VINTAGE=0, SPREAD=0, VOLUME=120,
+           REV_SIZE=112, REV_DAMP=65, REV_PRE=15, REV_MIX=70)
 hat = P("hat")
-hat.pc(T0 - 1500, PROG["INIT"])
-hat.set(T0 - 1400, MODE=3, O1_WAVE=0, O2_WAVE=0, NOISE=127, FTYPE=1, CUTOFF=118, RESO=25, FENV_AMT=64,
-        FA=0, AA=0, AD=55, AS=80, AR=50, KEYTRK=0, VEL_AMP=80, VINTAGE=0, SPREAD=0, VOLUME=90)
-for bar in range(8, 32):
-    kick.note(bar, 0, 36, 115, .5)
-    if bar >= 12 and bar < 28: kick.note(bar, 2.5, 36, 95, .5)
-    if bar >= 12:
-        snare.note(bar, 2, 55, 112, .3)
-        if bar % 4 == 3 and bar < 28: snare.note(bar, 3.5, 55, 75, .2)
-    for i in range(8):
-        if bar < 12 and i % 2: continue
-        hat.note(bar, i * .5, 70, 95 if i % 2 == 0 else 60, .12 if i != 7 else .4)
-    if bar in (19, 27):
-        for i in range(4): snare.note(bar, 2 + i * .5, 55, 80 + i * 12, .2)
-kick.note(32, 0, 36, 120, .5); snare.note(32, 0, 55, 105, .3)
+hat.setup(PROG["INIT"], oct=1, MODE=3, O1_WAVE=0, O2_WAVE=0, NOISE=127, FTYPE=1, CUTOFF=116, RESO=20, FENV_AMT=64,
+          FA=0, AA=0, AD=50, AS=70, AR=60, KEYTRK=0, VEL_AMP=90, VINTAGE=0, SPREAD=0, VOLUME=95)
+for bar in range(4, 40):
+    drums_on = not (24 <= bar < 28) and bar < 38
+    if drums_on:
+        for beat in range(4):
+            kick.note(bar, beat, 36, 118 if beat in (0, 2) else 110, .5)
+    if bar >= 8 and drums_on:
+        for beat in (1, 3):
+            for k in range(3): clap.note(bar, beat + k * 0.04, 60, 100 + k * 8, .25)   # the flam of a clap
+        for i in range(8):
+            open_ = i % 2 == 1
+            hat.note(bar, i * .5, 70, 100 if open_ else 55, .42 if open_ else .1)
+        if bar % 8 == 7: hat.note(bar, 3.75, 70, 90, .3)
+    if bar == 27:                                     # the breakdown's end: a clap roll into the drop
+        for i in range(8): clap.note(bar, 2 + i * .25, 60, 70 + i * 7, .15)
+    if bar == 23:
+        for i in range(4): clap.note(bar, 2 + i * .5, 60, 85 + i * 10, .2)
+kick.note(40, 0, 36, 120, .5); clap.note(40, 0, 60, 110, .25)
+hat.btns(T0 - 200, "ENV", "ENV")                      # AMP ENV on the hats' screen
 
-GAIN = {"arp": 2.8, "bass": 1.6, "pad": 1.1, "lead": 1.7, "arp2": 2.2, "strings": 0.9, "kick": 2.6, "snare": 4.0, "hat": 1.1}
+GAIN = {"arp": 3.6, "bass": 1.5, "pad": 1.1, "lead": 1.4, "arp2": 2.4, "strings": 1.0, "kick": 2.8, "clap": 4.2, "hat": 1.1}
 
 def run(part):
     script = part.write()
@@ -202,7 +240,15 @@ def run(part):
 def main():
     for p in parts.values(): p.write()
     if "--scripts-only" in sys.argv: return
-    stems = {n: run(p) for n, p in parts.items()}
+    from concurrent.futures import ThreadPoolExecutor
+    if "--mix-only" in sys.argv:                      # the stems as they are, only the gains and the sum
+        stems = {}
+        for name in parts:
+            with wave.open(str(HERE / "stems" / f"{name}.wav")) as w:
+                stems[name] = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).reshape(-1, 2).astype(np.float32) / 32768
+    else:
+        with ThreadPoolExecutor(3) as ex:
+            stems = dict(zip(parts.keys(), ex.map(run, parts.values())))
     n = max(len(a) for a in stems.values())
     mix = np.zeros((n, 2), np.float32)
     for name, a in stems.items():

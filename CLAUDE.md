@@ -45,9 +45,15 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   and the fixed ones (`cc_map_init`): the first 50 parameters take 20..63 and 65 (ARP GATE), the appended ones
   66 MORPH, 67-69 chorus, 70 delay time, 75-77 delay, 78-81 reverb. Program change picks the program. New
   parameters go at the end of the table so these numbers stay.
-- The video: `video/song.py` (nine OberVaves from the host build, E minor 100 BPM, 32 bars of dark arpeggios,
-  echoes and plate; stems/, f/<part>/ frames + logs, track.wav) and `video/make_video.py` -> `video/obervave-1.1.mp4`.
-  The renders are git-ignored. The host's splash takes 1.2 s: a script's first key must come after it (T0 = 2 s).
+- The video: `video/song.py` (nine OberVaves from the host build, D Phrygian 94 BPM, 40 bars: slow dark disco,
+  the four-note arpeggio all the way through, four on the floor, a woozy unison lead with octave dives; stems/,
+  f/<part>/ frames + logs for all nine, track.wav; `--mix-only` re-sums the stems with new gains) and
+  `video/make_video.py` (a shot list: focus / duo / trio / wall of nine, the kick pulses, the clap flashes, a cut
+  tears the colour planes for three frames) -> `video/obervave-1.1.mp4`. The renders are git-ignored.
+  **The arp and the delay run on the device tempo (settings, 120 BPM at first boot), not on the script's grid**:
+  every part dials the song's tempo in on the GLO page first (`Part.setup`), or the arpeggio restarts off the beat
+  at every chord change (that was the "springt am Anfang" of 1.1's first cut). The host's splash takes 1.2 s: a
+  script's first key must come after it (T0 = 3 s here, the tempo turn takes until ~2 s).
 - `tools/build.py`: `./build.sh [--release X.Y]` -> `build/obervave[-X.Y].fwsc`, identity FM-1_95Y.
 - Docs from Dinghy: docs/API.md (platform calls), docs/RULES.md (the chip), docs/MAKE-IT-YOURS.md.
 - Workspace file: `../obervave.code-workspace` (opened in VSCodium Insiders, flatpak).
@@ -60,8 +66,9 @@ others, the blue look, and the second video. Patches are 80 bytes (`SET_VERSION`
 package builds (103 KB image, 21 KB RAM, 274 KB pool) but has **still not been run on an FM-1**: first thing next
 time, install it, check the CPU meter (GLO page) with DARK ARP and with all three effects on a big patch, the
 knobs' feel, the splash. If the render time is over ~4000 us, `REV_DIV 2` (half-rate reverb) is the first lever;
-ask the user before taking any quality away. Open: the look's polish, MIDI clock is tempo-following only, the arp
-steps on 16-frame blocks, the delay time does not follow an external clock's tempo changes smoothly.
+ask the user before taking any quality away. CUTOFF and RESO slew ~23 ms per block (CC sweeps glide). Open: the
+look's polish, MIDI clock is tempo-following only, the arp steps on 16-frame blocks, the delay time does not follow
+an external clock's tempo changes smoothly, a tempo CC (the video sets it with the knob).
 
 ## Plan (agreed in the first session, 2026-10-12)
 
