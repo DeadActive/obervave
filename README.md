@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" width="800" alt="OberVave: the name in red glowing outlines, three blue bands through the lower half of the letters"></p>
+
 # OberVave
 
 **One 8-voice analog-style polysynth for the M-VAVE FM-1, with chorus, delay and a plate reverb.**
