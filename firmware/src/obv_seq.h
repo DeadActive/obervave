@@ -11,6 +11,7 @@
 #define PAT_MAGIC 0x31514553u                   /* "SEQ1" */
 
 typedef struct { uint8_t note[SEQ_CHORD], vel, gate, ratch, chance; } step_t;   /* note 0 = none; ratch 0..3 = 1..4 hits */
+#define STEP_OFF 0x80u                          /* in ratch: the step is switched off, its notes kept */
 typedef struct { uint16_t len; uint8_t div, swing; int8_t transp; uint8_t mute, pad[2]; } seqtrk_t;   /* swing 50..75 % */
 typedef struct { uint32_t magic; seqtrk_t trk[2]; step_t st[SEQ_STEPS]; } pattern_t;
 
@@ -145,7 +146,7 @@ static void seq_tick(void)
             r->dur = r->step & 1u ? base - sw : base + sw;   /* swing: the first of each pair longer */
             if (r->dur < CTL) r->dur = CTL;
             s = seq_step(t, r->step);
-            r->play = s->note[0] && !k->mute && (s->chance >= 100u || xorshift(&rnd_state) % 100u < s->chance);
+            r->play = s->note[0] && !(s->ratch & STEP_OFF) && !k->mute && (s->chance >= 100u || xorshift(&rnd_state) % 100u < s->chance);
             if (!(r->tie && r->play && seq_same(r, s, k->transp))) {   /* a tie into the same notes holds them */
                 seq_release(r);
                 if (r->play) seq_sound(r, s, k->transp);

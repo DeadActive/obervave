@@ -33,6 +33,16 @@ enum { ENC_SELECT = 0, ENC_ALGORITHM = 1, ENC_KNOB1 = 2, ENC_KNOB2 = 3, ENC_KNOB
 #include "fm1_guard.h"
 #define FM1_SETTLE_US 100u                      /* the boot scan (OCT- for the rescue): 10 us read no key on an FM-1, the tick waits 100 too */
 #include "fm1_input.h"
+static void fm1_led_key_glow(uint32_t id, int on)   /* as fm1_led_key, the dim layer (~1/24): "there is something here" */
+{
+    uint32_t p, r;
+    for (p = 0; p < FM1_NCOL; p++)
+        for (r = 1; r < 5u; r++)
+            if (FM1_KEYMAP[r][p] == (int8_t)id) {
+                if (on) fm1_led_dim[p] |= (uint8_t)(1u << r);
+                else fm1_led_dim[p] &= (uint8_t)~(1u << r);
+            }
+}
 #include "fm1_timer.h"
 #include "fm1_lcd_hw.h"
 #include "fm1_audio.h"
@@ -224,6 +234,12 @@ void fm1_timer5_irq(void)
         owed = 1;
     if (++sub == 10u)
         sub = 0;
+#if !FELUCCA_UAC                                /* MIDI only: the USB poll keeps its 2 kHz, nested in a render too (as zp12,
+                                                   whose MIDI out works on the device; OberVave's babbled with the poll put off) */
+    if (usb_due)
+        usb_poll();
+    return;
+#endif
     if (in_audio) {
         if (usb_due)
             UAC_ONLY(uac_service());

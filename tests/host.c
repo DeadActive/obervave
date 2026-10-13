@@ -39,6 +39,8 @@ static int32_t host_enc[7], host_enc_pos[7];    /* detents owed to the app; the 
 static int32_t fm1_enc_take(uint32_t e) { int32_t v = host_enc[e % 7u]; host_enc[e % 7u] = 0; return v; }
 static uint64_t host_leds;                      /* bit id: LED id lit (0..13 buttons, 14..40 keys) */
 static void fm1_led_key(uint32_t id, int on) { if (on) host_leds |= (uint64_t)1 << id; else host_leds &= ~((uint64_t)1 << id); }
+static uint64_t host_glow;                      /* the dim layer (not in the film log) */
+static void fm1_led_key_glow(uint32_t id, int on) { if (on) host_glow |= (uint64_t)1 << id; else host_glow &= ~((uint64_t)1 << id); }
 
 /* the screen: 240 x 240 RGB565, as the ST7789 gets it (gfx.c sends the bytes swapped) */
 static uint16_t fb[240 * 240];

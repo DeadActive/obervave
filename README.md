@@ -51,12 +51,17 @@ Integers only: the chip has no FPU. The whole engine is fixed point, the tables 
 - **HOME**: PERFORM (resonance, envelope amount, release, mod depth). **EDIT** cycles OSC 1 / OSC 2 / OSC MOD / FILTER /
   FILTER +. **ENV**: FILTER ENV / AMP ENV. **LFO**: LFO / LFO DEST / LFO +. **FX**: CHORUS / DELAY / REVERB.
   **ARP**: the arp page (MODE switches it off); on it, the button is HOLD (latch / sustain). **GLO**: GLOBAL (tempo,
-  MIDI channel, tune, CPU meter) / VOICE / OUTPUT. **SEQ**: SEQUENCER (track A / B, length, note value, swing) /
-  SEQ + (pattern, transpose, mute, clear: turn it all the way) / STEP (the step at the cursor: step, gate or TIE,
-  ratchet, chance).
-- **PLAY** starts the sequencer from step 1 and stops it. **REC** records into the track shown: stopped, the keys
-  write the chord at the cursor and move on when all are up, **SEQ** writes a rest; running, the notes land on the
-  nearest step. The strip under the knobs shows 16 steps: the chords as bars, the playhead blue, the cursor red.
+  MIDI channel, tune, CPU meter) / VOICE / OUTPUT.
+- **SEQ** opens the step view: the keys stop playing notes and become the sequencer (SEQ again, or any page button,
+  and they are notes again). The **16 white keys are steps 1-16** of the page shown: glowing = a note there,
+  bright = playing now. **Tap** a white key: the step on / off (an empty one gets the last note you played).
+  **Hold** a white key and turn a knob: that step's PITCH, GATE (up to TIE), RATCHET (1-4 hits), CHANCE; holding a
+  step also takes a chord from a MIDI keyboard. With no step held the knobs are the track's LENGTH, NOTE value,
+  SWING and TRANSPOSE. The **black keys**: F#3 / G#3 track A / B, A#3 / C#4 page back / on, D#4 mute,
+  F#4 / G#4 pattern back / on, A#4 held: clear the track. The bottom of the screen says what the keys do.
+- **PLAY** starts the sequencer from step 1 and stops it. **REC** records: the keys play notes again and write
+  them, chords too, into the selected step and move on (**SEQ** = a rest, **REC** again = done); while it runs they
+  land on the nearest step.
 - **SAVE** twice = save the program, or on a sequencer page the pattern (written once the sequencer stops).
   **SELECT** pressed twice = a random sound. **OCT- / OCT+** = octave.
 - The key LEDs show the notes that sound, the page buttons light for the page you are on, the eight round LEDs on

@@ -204,12 +204,12 @@ static void ui_leds(const volatile int32_t *level, uint32_t n)
     cv_blit(0, 200);
 }
 
-/* the sequencer's strip (instead of the scope): a line of text, then 16 steps of track t around the cursor (rec,
- * or stopped) or the playhead (running). A step: its chord as bars by pitch, dim when it plays by chance, ticks
- * for a ratchet, a bridge to the next for a tie. The playhead's step is blue, the cursor's framed in red. */
-static void ui_steps(uint32_t t, uint32_t cursor, int32_t playhead, uint32_t rec, const char *left, const char *right)
+/* the sequencer's strip (instead of the scope): a line of text, then the 16 steps of track t from w0 (the page the
+ * white keys play). A step: its chord as bars by pitch, dim when it plays by chance, grey when switched off, ticks
+ * for a ratchet, a bridge to the next for a tie. The playhead's step is blue, the selected one framed in red. */
+static void ui_steps(uint32_t t, uint32_t w0, int32_t cursor, int32_t playhead, uint32_t rec, const char *left, const char *right)
 {
-    uint32_t len = pat.trk[t].len, focus = playhead >= 0 && !rec ? (uint32_t)playhead : cursor, w0, i, k;
+    uint32_t len = pat.trk[t].len, i, k;
     int32_t lo = 127, hi = 0;
     cv_begin(240, 50, C_SCOPE_BG);
     cv_text(4, 0, &FONT_S, left, C_CREAM);
@@ -219,7 +219,6 @@ static void ui_steps(uint32_t t, uint32_t cursor, int32_t playhead, uint32_t rec
         cv_blit(0, 146);
         return;
     }
-    w0 = focus / 16u * 16u;
     for (i = 0; i < 16u && w0 + i < len; i++) {   /* the pitch range shown: the window's notes, at least an octave */
         const step_t *st = seq_step(t, w0 + i);
         for (k = 0; k < SEQ_CHORD && st->note[k]; k++) {
@@ -241,20 +240,29 @@ static void ui_steps(uint32_t t, uint32_t cursor, int32_t playhead, uint32_t rec
         if (n % 4u == 0u) cv_rect(x + 1, y, 13, 1, C_KNOB_HI);   /* the beats */
         if (!st->note[0]) cv_rect(x + 6, y + h / 2, 3, 2, C_DIMT);
         else {
-            uint16_t c = st->chance < 100u ? C_DIMT : C_CREAM;
+            uint16_t c = st->ratch & STEP_OFF ? C_KNOB_HI : st->chance < 100u ? C_DIMT : C_CREAM;
             for (k = 0; k < SEQ_CHORD && st->note[k]; k++) {
                 int32_t yy = y + h - 5 - (int32_t)(st->note[k] - lo) * (h - 9) / (hi - lo);
                 cv_rect(x + 3, yy, 9, 2, c);
             }
-            for (k = 0; k < st->ratch; k++) cv_rect(x + 3 + (int32_t)k * 3, y + h - 3, 2, 2, C_AMBER);
+            for (k = 0; k < (st->ratch & 3u); k++) cv_rect(x + 3 + (int32_t)k * 3, y + h - 3, 2, 2, C_AMBER);
             if (st->gate >= GATE_TIE && i < 15u) cv_rect(x + 12, y + h / 2 - 1, 5, 3, C_AMBER);
         }
-        if (n == cursor && (rec || playhead < 0)) {   /* the cursor: a red frame */
+        if (cursor >= 0 && n == (uint32_t)cursor) {   /* the selected step: a red frame */
             cv_rect(x, y - 1, 15, 2, C_RED); cv_rect(x, y + h - 1, 15, 2, C_RED);
             cv_rect(x, y - 1, 2, h + 1, C_RED); cv_rect(x + 13, y - 1, 2, h + 1, C_RED);
         }
     }
     cv_blit(0, 146);
+}
+
+/* the step view's hints (instead of the voice LEDs): what the keys do now, two lines */
+static void ui_hints(const char *l1, const char *l2, uint16_t c1)
+{
+    cv_begin(240, 36, C_PANEL);
+    cv_text((240 - text_w(&FONT_S, l1)) / 2, 1, &FONT_S, l1, c1);
+    cv_text((240 - text_w(&FONT_S, l2)) / 2, 19, &FONT_S, l2, C_DIMT);
+    cv_blit(0, 200);
 }
 
 /* the splash: the logo (firmware/gen/obv_splash.h, from tools/make_logo.py --splash). The glowing letters strike
