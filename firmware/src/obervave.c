@@ -327,14 +327,25 @@ static void draw_header(void)
         ui_header(prog, live.v + NPARAM, edited, tags);
         return;
     }
-    scat(tags, MODE_NAME[live.v[P_MODE] & 3u]);
-    scat(tags, " ");
-    scat(tags, FTYPE_NAME[live.v[P_FTYPE] % NFTYPE]);
-    if (live.v[P_ARP_MODE]) scat(tags, " ARP");
-    if (live.v[P_CHO_MIX] || live.v[P_DLY_MIX] || live.v[P_REV_MIX]) scat(tags, " FX");
-    if (hold) scat(tags, " HOLD");
-    if (ctl_seq_run) scat(tags, " SEQ");
-    if (rec) scat(tags, " REC");
+    {   /* short words, and what does not fit (23 characters) goes, the least important first: FX, ARP, HOLD */
+        static const char *const MODE_S[4] = {"POLY", "DUAL", "UNI", "MONO"};
+        static const char *const FT_S[NFTYPE] = {"LP12", "HP12", "BP12", "NOTCH", "LP24", "SEM"};
+        uint32_t arp = live.v[P_ARP_MODE] != 0, fx = live.v[P_CHO_MIX] || live.v[P_DLY_MIX] || live.v[P_REV_MIX], hd = hold;
+        uint32_t n = slen(MODE_S[live.v[P_MODE] & 3u]) + 1u + slen(FT_S[live.v[P_FTYPE] % NFTYPE])
+                   + (ctl_seq_run ? 4u : 0u) + (rec ? 4u : 0u) + (seq_trk ? 2u : 0u);
+        if (hd && n + 5u <= 23u) n += 5u; else hd = 0;
+        if (arp && n + 4u <= 23u) n += 4u; else arp = 0;
+        if (fx && n + 3u <= 23u) n += 3u; else fx = 0;
+        scat(tags, MODE_S[live.v[P_MODE] & 3u]);
+        scat(tags, " ");
+        scat(tags, FT_S[live.v[P_FTYPE] % NFTYPE]);
+        if (arp) scat(tags, " ARP");
+        if (fx) scat(tags, " FX");
+        if (hd) scat(tags, " HOLD");
+        if (seq_trk) scat(tags, " B");          /* (track B selected: A is the rest state) */
+        if (ctl_seq_run) scat(tags, " SEQ");
+        if (rec) scat(tags, " REC");
+    }
     ui_header(prog, live.v + NPARAM, edited, tags);
 }
 
