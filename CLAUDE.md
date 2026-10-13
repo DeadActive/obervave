@@ -85,9 +85,18 @@ Later on 2026-10-13: **the step sequencer** (two tracks, 256 steps, chords, ratc
 on the device**: updates from the running OberVave fail (the FM-1 stops answering after the first read request,
 "update failed" on the screen; the identity handshake answers only sometimes, later not at all; sound and screen
 run normally). Not the effects' load (all off: no change). The first install from SLOOP worked; the rescue mode
-(OCT- held at power-on) did not come up when the user tried. Next: find why the running app starves the USB / the
-updater (TIMER5's USB poll vs the audio ISR? the main loop's drawing?), compare with Dinghy on the device, and get
-the user into the rescue mode to install.
+(OCT- held at power-on) did not come up when the user tried. Diagnosis (18:40-19:00, host kernel log via
+`flatpak-spawn --host journalctl -k`): **every packet the FM-1 sends on the MIDI IN endpoint (0x81) babbles**
+(`usb 3-9: urb status -75`, -EOVERFLOW, dozens a second), the hub disables the port ("disabled by hub (EMI?)") and
+the FM-1 comes back as a new device with a cold boot (a held note is gone; five quick ones did not trip the boot
+guard, so not warm resets). Host -> FM-1 MIDI works (notes play, USB audio records fine with `parecord`). Since
+17:42, the first minute of OberVave on the device (keys send MIDI out too). Not the CPU load (idle, effects off:
+the same), not the LCD, not the descriptors (EP 0x81 bulk 64, EP 0x84 iso 196, total length right). The USB code
+and HAL are byte for byte sloopDX 3.4+'s; zp12 (FM-1_971, worked here) has FELUCCA_UAC 0 and no 48 kHz. Suspects:
+the USB audio (EP4 iso) together with EP1 IN in the SIE / DMA, or the 48 kHz variant. Plan: the user boots the
+rescue (OCT- alone held while switching on; it skips audio, app and TIMER5); if the identity answers there,
+install a build with `FELUCCA_UAC 0` first, then bisect (UAC with 44.1 only, UAC on). Do not poll the running
+OberVave with `--info` while the user tries the rescue: each poll reboots it.
 
 Third session added the effects (chorus / delay / plate reverb, three FX pages), the SEM filter morph, the dark
 arpeggio programs (01 DARK ARP, 26 UPSIDE ARP, 29 NEON PAD; BRASS STAB moved to 13) with effects on most of the
