@@ -423,7 +423,7 @@ static void draw_page(void)
         k[i].present = 0;
         k[i].bip = 0;
         k[i].value[0] = 0;
-        if (page == PG_GLOBAL) {
+        if (page == PG_GLOBAL && !layer) {
             static const char *const GL[4] = {"TEMPO", "CLICK", "MIDI CH", "TUNE"};
             k[i].label = GL[i];
             k[i].present = 1;
@@ -939,7 +939,7 @@ static void app_main(void)
             int32_t p = PAGE[page].p[k];
             if ((e = fm1_enc_take(ENC_KNOB1 + k)) == 0) continue;
             if (e > 1 || e < -1) e *= 3;        /* a fast turn goes further */
-            if (page == PG_GLOBAL) {
+            if (page == PG_GLOBAL && !layer) {    /* (a held layer has the knobs, on every page) */
                 if (k == 0) { set.tempo = (uint8_t)clampi(set.tempo + e, 40, 240); ctl_tempo = set.tempo; }
                 else if (k == 1) set.click = (uint8_t)clampi((int32_t)(set.click % NCLICK) + (e > 0 ? 1 : -1), 0, NCLICK - 1);
                 else if (k == 2) set.midi_ch = (uint8_t)clampi(set.midi_ch + e, 0, 16);
