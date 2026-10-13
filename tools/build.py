@@ -38,7 +38,7 @@ LOADER_LOAD = 0x01C0A800
 LOADER_NAME = b"usb_hid_ota.bin"    # the file name the SPL looks for
 DOCKER_IMAGE = os.environ.get("JIELI_DOCKER_IMAGE", "debian:bookworm-slim")
 CFLAGS = ["-Os", "-ffunction-sections", "-fno-builtin", "-Wall", "-Wno-unused-function"]
-APP_CFLAGS = ["-O2", *CFLAGS[1:]]   # the synth: speed over size (the image has room; the ISR has not)
+APP_CFLAGS = [os.environ.get("OBV_OPT", "-O2"), *CFLAGS[1:]]   # the synth: speed over size (OBV_OPT=-Os: as Dinghy, a test)
 LINE = re.compile(r"^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2} )+)\s*\t(.*)$")
 
 # SDK files of AC79NN_SDK_V1.2.1_2023-12-13 (the tested version)

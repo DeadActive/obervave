@@ -21,7 +21,7 @@ static step_t *seq_step(uint32_t t, uint32_t i) { return &pat.st[t ? SEQ_STEPS -
 /* main loop -> ISR */
 static volatile uint32_t ctl_seq_run, ctl_seq_restart;
 /* ISR -> main loop: where each track is (step, and how far into it, Q8) */
-static volatile uint32_t ui_seq_pos[2], ui_seq_frac[2], ui_seq_ticks;
+static volatile uint32_t ui_seq_pos[2], ui_seq_frac[2], ui_seq_dur[2], ui_seq_ticks, ui_seq_beat;   /* dur: frames */
 
 /* ---- a fresh pattern, and the factory ones (D Phrygian, as the dark arpeggios) */
 static void step_clear(step_t *s)
@@ -82,7 +82,7 @@ static void pat_factory(uint32_t n, pattern_t *p)
 /* ---- the player (ISR, per CTL block) */
 typedef struct { uint32_t cnt, dur, step, sub, rat_n, rat_i, gate_at, nsnd, play, tie; uint8_t snd[SEQ_CHORD]; } seqrun_t;
 static seqrun_t sr[2];
-static uint32_t seq_was;
+static uint32_t seq_was, seq_beat_cnt;
 
 static void seq_release(seqrun_t *r)
 {
@@ -103,15 +103,31 @@ static void seq_sound(seqrun_t *r, const step_t *s, int32_t transp)
         r->snd[r->nsnd++] = (uint8_t)n;
     }
 }
-static uint32_t seq_same(const seqrun_t *r, const step_t *s, int32_t transp)   /* the step plays what sounds now */
+static uint32_t seq_has(const step_t *s, uint32_t m, int32_t transp)   /* the step plays note m */
 {
-    uint32_t i, j, n = 0;
-    for (i = 0; i < SEQ_CHORD && s->note[i]; i++, n++) {
-        uint32_t m = seq_note(s, i, transp);
-        for (j = 0; j < r->nsnd && r->snd[j] != m; j++) ;
-        if (j == r->nsnd) return 0;
+    uint32_t i;
+    for (i = 0; i < SEQ_CHORD && s->note[i]; i++)
+        if (seq_note(s, i, transp) == m) return 1;
+    return 0;
+}
+
+/* a tie, note by note: what the new step plays again keeps sounding, the rest lets go, the new ones start */
+static void seq_tie_into(seqrun_t *r, const step_t *s, int32_t transp, uint32_t play)
+{
+    uint32_t i, j, keep = 0;
+    for (i = j = 0; i < r->nsnd; i++) {
+        if (play && seq_has(s, r->snd[i], transp)) { r->snd[j++] = r->snd[i]; keep++; }
+        else voice_release(r->snd[i], 1);
     }
-    return n == r->nsnd;
+    r->nsnd = j;
+    if (!play) return;
+    for (i = 0; i < SEQ_CHORD && s->note[i] && r->nsnd < SEQ_CHORD; i++) {
+        uint32_t m = seq_note(s, i, transp);
+        for (j = 0; j < keep && r->snd[j] != m; j++) ;
+        if (j < keep) continue;
+        voice_trigger(m, s->vel ? s->vel : 100u);
+        r->snd[r->nsnd++] = (uint8_t)m;
+    }
 }
 
 static void seq_tick(void)
@@ -129,9 +145,13 @@ static void seq_tick(void)
             sr[t].cnt = sr[t].dur = 0;
             sr[t].play = sr[t].tie = 0;
         }
+        seq_beat_cnt = 0;
         seq_was = 1;
     }
     q = ctl_ext_quarter ? ctl_ext_quarter : 60u * FS / clampi(ctl_tempo, 40, 240);
+    if (seq_beat_cnt == 0u) ui_seq_beat++;          /* the beats (the PLAY light flashes on each) */
+    seq_beat_cnt += CTL;
+    if (seq_beat_cnt >= q) seq_beat_cnt = 0;
     for (t = 0; t < 2u; t++) {
         seqrun_t *r = &sr[t];
         const seqtrk_t *k = &pat.trk[t];
@@ -147,7 +167,9 @@ static void seq_tick(void)
             if (r->dur < CTL) r->dur = CTL;
             s = seq_step(t, r->step);
             r->play = s->note[0] && !(s->ratch & STEP_OFF) && !k->mute && (s->chance >= 100u || xorshift(&rnd_state) % 100u < s->chance);
-            if (!(r->tie && r->play && seq_same(r, s, k->transp))) {   /* a tie into the same notes holds them */
+            if (r->tie)                         /* a tie: the notes the step plays again hold */
+                seq_tie_into(r, s, k->transp, r->play);
+            else {
                 seq_release(r);
                 if (r->play) seq_sound(r, s, k->transp);
             }
@@ -166,6 +188,7 @@ static void seq_tick(void)
         }
         if (r->nsnd && r->gate_at != 0xFFFFFFFFu && r->cnt - r->rat_i * r->sub >= r->gate_at) seq_release(r);
         r->cnt += CTL;
+        ui_seq_dur[t] = r->dur;
         ui_seq_pos[t] = r->step;
         ui_seq_frac[t] = r->dur ? r->cnt * 256u / r->dur : 0u;
     }

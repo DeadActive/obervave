@@ -32,8 +32,16 @@
 
 static volatile uint32_t fm1_ms;
 static struct { uint32_t notes, buttons; } fm1_in;
-static uint32_t host_edges;
-static uint32_t fm1_input_edges(uint32_t *released) { uint32_t b = host_edges; host_edges = 0; *released = 0; return b; }
+static uint32_t host_edges, host_rel, host_rel_next;   /* press edges, release edges (a tap's release: the call after) */
+static uint32_t fm1_input_edges(uint32_t *released)
+{
+    uint32_t b = host_edges;
+    host_edges = 0;
+    *released = host_rel;
+    host_rel = host_rel_next;
+    host_rel_next = 0;
+    return b;
+}
 static uint32_t fm1_input_note_edges(void) { return 0; }   /* (the script sets fm1_in.notes) */
 static int32_t host_enc[7], host_enc_pos[7];    /* detents owed to the app; the position so far (the film's log) */
 static int32_t fm1_enc_take(uint32_t e) { int32_t v = host_enc[e % 7u]; host_enc[e % 7u] = 0; return v; }
@@ -113,7 +121,7 @@ static void app_main(void);
 
 /* the script: at t ms, keys down (bit k = key k, 0 = F3), a button edge, a MIDI message. A script file (the second
  * argument) replaces it, a line each: "T keys MASK" (hex or decimal), "T btn ID", "T midi ST D1 D2", "T enc ID N"
- * (encoder ID turned N detents, + = clockwise), "T end" */
+ * (encoder ID turned N detents, + = clockwise), "T btndown ID" / "T btnup ID" (a button held, let go), "T end" */
 typedef struct { uint32_t t, keys; int btn; uint8_t st, d1, d2; int8_t enc, encn; } host_ev_t;
 static const host_ev_t SCRIPT0[] = {
     {200, 1u << 7, -1, 0, 0, 0, -1, 0},                         /* C4 */
@@ -143,7 +151,9 @@ static void read_script(const char *path)
         if (line[0] == '#' || sscanf(line, "%u %15s", &e.t, what) != 2) continue;
         if (!strcmp(what, "end")) { end_ms = e.t; continue; }
         if (!strcmp(what, "keys")) { sscanf(line, "%*u %*s %i", (int *)&e.keys); }
-        else if (!strcmp(what, "btn")) { sscanf(line, "%*u %*s %d", &e.btn); }
+        else if (!strcmp(what, "btn")) { sscanf(line, "%*u %*s %d", &e.btn); }          /* a tap */
+        else if (!strcmp(what, "btndown")) { sscanf(line, "%*u %*s %d", &e.btn); e.btn += 100; }   /* held ... */
+        else if (!strcmp(what, "btnup")) { sscanf(line, "%*u %*s %d", &e.btn); e.btn += 200; }     /* ... let go */
         else if (!strcmp(what, "enc")) { sscanf(line, "%*u %*s %d %d", &ea, &eb); e.enc = (int8_t)ea; e.encn = (int8_t)eb; }
         else if (!strcmp(what, "midi")) { sscanf(line, "%*u %*s %i %u %u", (int *)&a, &b, &c); e.st = (uint8_t)a; e.d1 = (uint8_t)b; e.d2 = (uint8_t)c; }
         else continue;
@@ -227,8 +237,16 @@ static void platform_poll(void)                 /* one call = one millisecond */
         if (script[step].st) {
             mq[mq_w % 64u][0] = script[step].st; mq[mq_w % 64u][1] = script[step].d1; mq[mq_w % 64u][2] = script[step].d2;
             mq_w++;
-        } else if (script[step].btn >= 0)
+        } else if (script[step].btn >= 200) {
+            host_rel |= 1u << (script[step].btn - 200);
+            fm1_in.buttons &= ~(1u << (script[step].btn - 200));
+        } else if (script[step].btn >= 100) {
+            host_edges |= 1u << (script[step].btn - 100);
+            fm1_in.buttons |= 1u << (script[step].btn - 100);
+        } else if (script[step].btn >= 0) {
             host_edges |= 1u << script[step].btn;
+            host_rel_next |= 1u << script[step].btn;
+        }
         else if (script[step].enc >= 0)
             host_enc[script[step].enc % 7] += script[step].encn, host_enc_pos[script[step].enc % 7] += script[step].encn;
         else
