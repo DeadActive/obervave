@@ -204,23 +204,43 @@ static void ui_leds(const volatile int32_t *level, uint32_t n)
     cv_blit(0, 200);
 }
 
-/* the splash: the bands sweep in, the name stands in them (~1.2 s, polls meanwhile) */
+/* the splash: the logo (firmware/gen/obv_splash.h, from tools/make_logo.py --splash). The glowing letters strike
+ * like a neon tube (a few flickers, then full), the three bands sweep in from the left, the line under it fades in.
+ * ~1.2 s, polls meanwhile. Both layers are RLE over one palette; they are read in step, pixel by pixel */
+#include "obv_splash.h"
+#define SPLASH_Y 70
+static void splash_frame(uint32_t fade, int32_t x_to, uint32_t sub)
+{
+    const uint8_t *a = SPLASH_RLE0, *b = SPLASH_RLE1;     /* the letters; the letters with the bands */
+    uint32_t ra = 0, rb = 0, ia = 0, ib = 0, x = 0, y = 0, n = SPLASH_W * SPLASH_H, i;
+    cv_begin(240, SPLASH_H + 40, C_PANEL);
+    for (i = 0; i < n; i++) {
+        uint16_t c;
+        if (!ra) { ra = *a++; ia = *a++; }
+        if (!rb) { rb = *b++; ib = *b++; }
+        ra--; rb--;
+        c = SPLASH_PAL[(int32_t)x < x_to ? ib : ia];
+        if (c != C_PANEL)
+            cv_px[y * 240u + x] = swap16(fade >= 256u ? c : blend565(C_PANEL, c, fade));
+        if (++x == SPLASH_W) { x = 0; y++; }
+    }
+    if (sub) {
+        const char *t = "8-VOICE ANALOG POLY + FX";
+        cv_text((240 - text_w(&FONT_S, t)) / 2, SPLASH_H + 16, &FONT_S, t, sub >= 256u ? C_DIMT : blend565(C_PANEL, C_DIMT, sub));
+    }
+    cv_blit(0, SPLASH_Y);
+}
+
 static void ui_splash(void)
 {
+    /* the strike: dark, two short flashes, a dip, then it holds (per 40 ms frame, 0..256) */
+    static const uint16_t STRIKE[12] = {0, 90, 20, 0, 200, 60, 30, 256, 180, 256, 256, 256};
     uint32_t t0 = fm1_ms, k;
-    int32_t tw = text_w(&FONT_L, "OBERVAVE"), x0 = (240 - tw) / 2;
     lcd_fill(0, 0, 240, 240, C_PANEL);
-    for (k = 0; k <= 24u; k++) {
-        int32_t x_to = (int32_t)(k * k * 240u / 576u) + 2;   /* eases in */
-        cv_begin(240, 90, C_PANEL);
-        if (k >= 6u)
-            cv_text(x0, 10, &FONT_L, "OBERVAVE", C_CREAM);
-        cv_stripes(10 + 16, 4, 1, x_to, 0);
-        if (k >= 14u) {
-            const char *s = "8-VOICE ANALOG POLY + FX";
-            cv_text((240 - text_w(&FONT_S, s)) / 2, 66, &FONT_S, s, C_DIMT);
-        }
-        cv_blit(0, 76);
+    for (k = 0; k < 30u; k++) {
+        uint32_t fade = k < 12u ? STRIKE[k] : 256u, sub = k < 16u ? 0u : (k - 16u) * 32u;
+        int32_t x_to = k < 10u ? 0 : (int32_t)((k - 10u) * (k - 10u) * 240u / 196u) + 2;   /* eases in, 10 .. 24 */
+        splash_frame(fade, x_to, sub);
         while (fm1_ms - t0 < 40u * (k + 1u)) platform_poll();
     }
     while (fm1_ms - t0 < 1200u) platform_poll();
