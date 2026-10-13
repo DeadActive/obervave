@@ -69,7 +69,7 @@ class Part:
     def turn(self, t0, t1, e, detents):               # a knob turned `detents` (signed) between t0 and t1, a detent a step
         n = abs(detents)
         for i in range(n): self.enc(t0 + (t1 - t0) * i // max(1, n - 1), e, 1 if detents > 0 else -1)
-    def sweep(self, t0, t1, name, v0, v1, step_ms=20):   # a CC ramp
+    def sweep(self, t0, t1, name, v0, v1, step_ms=40):   # a CC ramp (the engine slews the cutoff: 40 ms steps are smooth)
         n = max(1, (t1 - t0) // step_ms)
         for i in range(n + 1): self.cc(t0 + i * step_ms, name, int(round(v0 + (v1 - v0) * i / n)))
     def bend(self, t0, t1, b0, b1, step_ms=15):           # pitch bend ramp, -8192..8191

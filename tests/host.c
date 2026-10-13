@@ -113,12 +113,12 @@ static const uint32_t SHOT[] = {1000, 3000};
 
 static void read_script(const char *path)
 {
-    static host_ev_t ev[4096];
+    static host_ev_t ev[65536];
     char line[256], what[16];
     FILE *f = fopen(path, "r");
     uint32_t n = 0;
     if (!f) { perror(path); exit(1); }
-    while (fgets(line, sizeof line, f) && n < 4096u) {
+    while (fgets(line, sizeof line, f) && n < 65536u) {
         host_ev_t e = {0, 0, -1, 0, 0, 0, -1, 0};
         unsigned a = 0, b = 0, c = 0;
         int ea = 0, eb = 0;
@@ -131,6 +131,7 @@ static void read_script(const char *path)
         else continue;
         ev[n++] = e;
     }
+    if (!feof(f)) fprintf(stderr, "%s: more than 65536 events, the rest (and the end line) ignored\n", path);
     fclose(f);
     script = ev;
     script_n = n;
