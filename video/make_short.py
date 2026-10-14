@@ -254,7 +254,7 @@ if __name__ == "__main__":
             Image.frombytes("RGB", (SW, SH), frame(f)).save(MV.A / f"short-{x}.png")
             print(MV.A / f"short-{x}.png")
         sys.exit(0)
-    t0 = MV.T0 + B0 * BAR
+    t0 = B0 * BAR                                      # track.wav starts at the music (T0)
     host = ["flatpak-spawn", "--host"] if Path("/.flatpak-info").exists() else []   # (the sandbox's ffmpeg has no libx264)
     ff = subprocess.Popen(host + ["nice", "-n", "15", "ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{SW}x{SH}",
                            "-r", str(FPS), "-i", "-", "-ss", f"{t0:.3f}", "-i", str(MV.A / "track.wav"),

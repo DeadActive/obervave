@@ -916,7 +916,7 @@ if __name__ == "__main__":
             print(A / f"still-{bb:g}.png")
         sys.exit(0)
     ff = subprocess.Popen(["nice", "-n", "15", "ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
-                           "-r", str(FPS), "-i", "-", "-ss", str(T0), "-i", str(A / "track.wav"),   # sound from the first frame
+                           "-r", str(FPS), "-i", "-", "-i", str(A / "track.wav"),   # track.wav starts at T0 already: sound from the first frame
                            "-af", "volume=5dB,alimiter=limit=0.89:attack=3:release=60:level=false",
                            "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-maxrate", "16M", "-bufsize", "32M", "-pix_fmt", "yuv420p",
                            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", "-shortest", str(OUT)], stdin=subprocess.PIPE)
