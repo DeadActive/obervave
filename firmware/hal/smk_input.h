@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
- * SMK-37 Pro port: Copyright (C) 2026 M. Geisler (genkigenki/makkuro) */
+ * SMK-37 Pro port: Copyright (C) 2026 M. Geisler (genkigenki/makkuro)
+ * OberVave: the pad event queue (smk_pad_events, smk_pad_take): Copyright (C) 2026 zvenson */
 /* SMK-37 Pro input HAL: velocity keybed, buttons, encoders, button LEDs, pads, faders, wheels.
  * The FM-1 counterpart is fm1_input.h + fm1_adc.h; this header keeps their API (fm1_in, fm1_input_init,
  * fm1_input_tick, fm1_input_scan, fm1_enc_take, fm1_input_edges, fm1_input_note_edges, fm1_led_key) so
@@ -140,6 +141,13 @@ static volatile struct {
     uint32_t adc_ok, adc_miss;   /* (debug: conversions read / not finished within a tick) */
     uint32_t frames;
 } fm1_in;
+
+/* pad events for an app that handles the pads itself (smk_pad_events = 1, OberVave: the step pads): hardware pad << 8 |
+ * velocity, 0 = released; no note bits then */
+static volatile uint8_t smk_pad_events;
+#define SMK_PADQ 32u
+static volatile uint16_t smk_padq[SMK_PADQ];
+static volatile uint8_t smk_padq_w, smk_padq_r;
 
 /* key events beyond the FM-1's 27 (keybed keys 0..4 and 32..36): key << 8 | velocity (0 = release) */
 #define SMK_EXTQ 32u
@@ -440,7 +448,16 @@ static void fm1__frame(void)
 
 static void smk__padq(uint32_t pad, uint32_t vel)     /* a pad hit (vel) or release (0): its white key */
 {
-    int32_t n0 = smk_pad_piano ? SMK_PIANO_NOTE[pad] : (int32_t)SMK_WHITE_NOTE[smk_pad_grid ? pad : SMK_WHITE_OF_PAD(pad)];
+    int32_t n0;
+    if (smk_pad_events) {                             /* (the app's own pads: an event, no note) */
+        uint8_t w = smk_padq_w;
+        if ((uint8_t)(w + 1u) % SMK_PADQ != smk_padq_r) {
+            smk_padq[w] = (uint16_t)(pad << 8 | vel);
+            smk_padq_w = (uint8_t)((w + 1u) % SMK_PADQ);
+        }
+        return;
+    }
+    n0 = smk_pad_piano ? SMK_PIANO_NOTE[pad] : (int32_t)SMK_WHITE_NOTE[smk_pad_grid ? pad : SMK_WHITE_OF_PAD(pad)];
     uint32_t n, bit;
     if (vel) {
         if ((smk_pad_pick >> pad) & 1u) {
@@ -645,6 +662,17 @@ static uint32_t smk_pick_take(void)             /* the pads hit for the picker s
     smk_pick_hits = 0;
     fm1__unlock(k);
     return h;
+}
+
+/* the next pad event (hardware pad << 8 | velocity, 0 = release; smk_pad_events), -1 if none */
+static int32_t smk_pad_take(void)
+{
+    int32_t v = -1;
+    if (smk_padq_r != smk_padq_w) {
+        v = smk_padq[smk_padq_r];
+        smk_padq_r = (uint8_t)((smk_padq_r + 1u) % SMK_PADQ);
+    }
+    return v;
 }
 
 /* the next outer-key event (keybed key << 8 | velocity, 0 = release), -1 if none */

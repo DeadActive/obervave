@@ -53,6 +53,9 @@ static void note_event(uint32_t on, uint32_t note, uint32_t vel)
 /* the controllers (main loop writes) */
 static volatile int32_t ctl_bend;               /* -8192..8191 */
 static volatile uint32_t ctl_sustain, ctl_hold, ctl_cc7 = 127;
+#if BOARD_SMK37
+static volatile int32_t ctl_vib;                /* the SMK-37's mod wheel 0..127: a vibrato from the LFO, up to +-1/2 semitone */
+#endif
 static volatile int32_t ctl_tune8;              /* global tune, Q8 semitones */
 static volatile uint32_t ctl_tempo = 120, ctl_ext_quarter;   /* MIDI clock: frames per quarter, 0 = none */
 static volatile uint32_t ctl_arp_restart, ctl_panic;
@@ -491,6 +494,9 @@ static void voice_block(voice_t *v, uint32_t card)
     /* pitch, Q8 semitones */
     p8 = (v->pitch16 >> 8) + bend8 + ctl_tune8 + v->det8 + ((VINT_TUNE8[card] * vint) >> 7) + ((v->drift * vint) >> 10);
     p8 += (lfo * wheel_q * 4) >> 15;            /* the wheel's vibrato */
+#if BOARD_SMK37
+    p8 += (lfo * ctl_vib) >> 15;                /* the SMK-37's mod wheel: pitch only, gentle */
+#endif
     lfo_to = (lfo * lfo_pd * 24) >> 15;
     p1 = p8 + (live.v[P_LFO_PITCH_TO] != TO_O2 ? lfo_to : 0);
     p2 = p8 + (live.v[P_LFO_PITCH_TO] != TO_O1 ? lfo_to : 0) + ((int32_t)live.v[P_O2_SEMI] - 24) * 256 + det_fine8

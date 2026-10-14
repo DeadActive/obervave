@@ -64,8 +64,35 @@ static const char *const CLICK_NAME[NCLICK] = {"OFF", "REC", "ON", "COUNT-IN"};
  * layer (the keys and knobs change job until it is let go; HOME tapped while it is held locks it open) */
 enum { L_NONE, L_SEQ, L_EDIT, L_GLO, L_SAVE, L_FX };
 static uint32_t layer, layer_lock, layer_used, layer_t, layer_btn, rec_from_arp;
+#if BOARD_SMK37
+/* the SMK-37's step pads (obv_smk.h): held pads, the velocity a new step gets; a pad held 250 ms shows its step */
+static uint32_t smk_pads_held, smk_pad_t0, smk_step_vel;
+#define SMK_PAD_HELD (smk_pads_held != 0u && fm1_ms - smk_pad_t0 >= 250u)
+#define KEY_VEL(k) fm1_in.key_vel[SMK_KEY_F3 + (k)]   /* the keys play with velocity (the unit's factory curves) */
+#define STEP_NEW_VEL(st) do { if (smk_step_vel) (st)->vel = (uint8_t)smk_step_vel; } while (0)
+#define REC_TIE_VEL(t, s0) seq_step(t, s0)->vel   /* a recorded long note: its ties keep the played velocity */
+/* the button and knob names in the hints: the SMK's printed ones (PARA = EDIT, PATCH = HOME, SCALE = SEL; K2 SELECT,
+ * K3 ALGORITHM, K8 = KNOB 4) */
+#define NM_EDIT "PARA"
+#define NM_HOME "PATCH"
+#define NM_SELBTN "SCALE"
+#define NM_SELECT "K2"
+#define NM_ALGO "K3"
+#define NM_KNOB4 "K8"
+#else
+#define SMK_PAD_HELD 0
+#define KEY_VEL(k) 100
+#define STEP_NEW_VEL(st) ((void)0)
+#define REC_TIE_VEL(t, s0) 100u
+#define NM_EDIT "EDIT"
+#define NM_HOME "HOME"
+#define NM_SELBTN "SELECT"
+#define NM_SELECT "SELECT"
+#define NM_ALGO "ALGORITHM"
+#define NM_KNOB4 "KNOB 4"
+#endif
 static int steps_on(void) { return layer == L_SEQ && !rec; }
-static int seq_shown(void) { return is_seq_page(page) || layer == L_SEQ || layer == L_EDIT; }
+static int seq_shown(void) { return is_seq_page(page) || layer == L_SEQ || layer == L_EDIT || SMK_PAD_HELD; }
 static uint8_t pen_chord[4];                    /* the last note or chord played: what an empty step gets */
 static uint32_t pen_n, notes_down, tap_t[3];
 static void say(const char *s) { toast = s; toast_t = fm1_ms; }
@@ -166,7 +193,7 @@ static void rec_note(uint32_t on, uint32_t note, uint32_t vel)
     if (n > len) n = len;
     for (k = 0; k < n; k++) {                   /* tied on: the note in each step it lasts, the last one ends */
         step_t *st = seq_step(t, (s0 + k) % len);
-        step_add(st, note, vel ? vel : 100u);
+        step_add(st, note, vel ? vel : REC_TIE_VEL(t, s0));
         st->gate = k + 1u < n ? GATE_TIE : 110;
     }
 }
@@ -423,7 +450,7 @@ static void draw_page(void)
         k[i].present = 0;
         k[i].bip = 0;
         k[i].value[0] = 0;
-        if (page == PG_GLOBAL && !layer) {
+        if (page == PG_GLOBAL && !layer && !SMK_PAD_HELD) {
             static const char *const GL[4] = {"TEMPO", "CLICK", "MIDI CH", "TUNE"};
             k[i].label = GL[i];
             k[i].present = 1;
@@ -486,9 +513,13 @@ static uint32_t hints_key = 0xFFFFFFFFu;
 static void draw_hints(void)
 {
     static const char *const ROT[3][2] = {
-        {"HOLD SEQ: KEYS ARE STEPS", "HOLD EDIT: KEYS ERASE"},
-        {"ALGORITHM: TRACK A / B", "SELECT: TEMPO"},
-        {"PLAY: START  REC: RECORD LIVE", "REC HELD=CLEAR EDIT+KEY=ERASE"}};
+#if BOARD_SMK37
+        {"PADS ARE STEPS  < >: PAGE", "HOLD " NM_EDIT ": KEYS ERASE"},
+#else
+        {"HOLD SEQ: KEYS ARE STEPS", "HOLD " NM_EDIT ": KEYS ERASE"},
+#endif
+        {NM_ALGO ": TRACK A / B", NM_SELECT ": TEMPO"},
+        {"PLAY: START  REC: RECORD LIVE", "REC HELD=CLEAR " NM_EDIT "+KEY=ERASE"}};
     static char ring[24];
     uint32_t r = (fm1_ms / 3500u) % 3u, key, held = rec_down ? fm1_ms - rec_down_t : 0u;
     int toasting = toast && fm1_ms - toast_t < 1500u;
@@ -510,10 +541,10 @@ static void draw_hints(void)
     else if (rec == REC_ON) ui_hints(seq_trk ? "RECORDING TRACK B" : "RECORDING TRACK A", "PLAY ON TOP  REC: STOP REC", C_RED);
     else if (rec == REC_READY) ui_hints("REC READY", "YOUR FIRST NOTE STARTS IT", C_RED);
     else if (step_held >= 0) ui_hints("KNOB: EDIT  TAP LATER: LONG", "NOTE  LEVEL  RATCHET  GATE", C_AMBER);
-    else if (layer == L_SEQ) ui_hints("WHITE KEYS = STEPS  OCT: PAGE", "F#3-A#4: PAGE 1-8 HOME: LOCK", C_AMBER);
+    else if (layer == L_SEQ) ui_hints("WHITE KEYS = STEPS  OCT: PAGE", "F#3-A#4: PAGE 1-8 " NM_HOME ": LOCK", C_AMBER);
     else if (layer == L_EDIT) ui_hints("KEY: ERASE THAT NOTE", "OCT-: UNDO  OCT+: REDO", C_AMBER);
     else if (layer == L_GLO) ui_hints("KEY 1 2: MUTE A B  5 6: SOLO", "LAST KEY (G5): TAP TEMPO", C_AMBER);
-    else if (layer == L_SAVE) ui_hints("WHITE KEYS 1-8: PATTERN 1-8", "+ SELECT PRESSED: NEW SOUND", C_AMBER);
+    else if (layer == L_SAVE) ui_hints("WHITE KEYS 1-8: PATTERN 1-8", "+ " NM_SELBTN " PRESSED: NEW SOUND", C_AMBER);
     else if (layer == L_FX) ui_hints("KNOBS: CHORUS DELAY REVERB", "AND THE DELAY'S TIME", C_AMBER);
     else ui_hints(ROT[r][0], ROT[r][1], C_CREAM);
 }
@@ -627,6 +658,7 @@ static void seq_key_down(uint32_t k)
                 undo_save();
                 step_clear(st);
                 for (q = 0; q < (pen_n ? pen_n : 1u) && q < SEQ_CHORD; q++) st->note[q] = pen_n ? pen_chord[q] : (uint8_t)pen;
+                STEP_NEW_VEL(st);               /* (SMK-37: the velocity of the key or pad that set it) */
                 step_turned = 1;                /* (kept when it is let go) */
                 pat_edited = 1;
             }
@@ -704,6 +736,9 @@ static void glo_key(uint32_t k)
 
 /* ---- the main loop */
 #define KEY0 53u                                /* key 0 = F3 */
+#if BOARD_SMK37
+#include "obv_smk.h"                            /* the SMK-37's pads, outer keys, faders, wheels, < >, FADER BANK */
+#endif
 
 static uint32_t cycle_page(uint32_t first, uint32_t count)   /* a button steps through its pages */
 {
@@ -717,6 +752,9 @@ static void app_main(void)
     uint32_t clk_n = 0, clk_t0 = 0, clk_last = 0, leds_prev = 0xFFFFFFFFu, glow = 0, glow_prev = 0xFFFFFFFFu, t_steps = 0, ticks_seen = 0, dirty_steps = 1;
     uint8_t held_key[27] = {0}, key_step[27] = {0};
     rnd = 0xC0FFEE42u;
+#if BOARD_SMK37
+    smk_pad_events = 1;                         /* the pads are OberVave's step pads (obv_smk.h), not notes */
+#endif
     engine_init();
     cc_map_init();
     set.version = 0;
@@ -769,8 +807,8 @@ static void app_main(void)
                         say(msg);
                     }
                 } else {
-                    note_event(1, held_key[k], 100); midi_send(0x90, held_key[k], 100);
-                    if (!live.v[P_ARP_MODE]) rec_note(1, held_key[k], 100);
+                    note_event(1, held_key[k], KEY_VEL(k)); midi_send(0x90, held_key[k], KEY_VEL(k));
+                    if (!live.v[P_ARP_MODE]) rec_note(1, held_key[k], KEY_VEL(k));
                     pen_add(held_key[k]);
                 }
                 dirty_steps = dirty_page = 1;
@@ -786,6 +824,10 @@ static void app_main(void)
                 dirty_steps = dirty_page = 1;
             }
         }
+#if BOARD_SMK37
+        smk_pads(base, &dirty_steps);           /* the step pads, the outer keys */
+        if (dirty_steps) dirty_page = 1;
+#endif
         while (arp_qr != arp_qw) {              /* REC with the arp on: what it plays is recorded */
             uint8_t on = arp_q[arp_qr % AQ][0], n = arp_q[arp_qr % AQ][1];
             arp_qr++;
@@ -834,6 +876,9 @@ static void app_main(void)
                 }
             }
         }
+#if BOARD_SMK37
+        smk_buttons(b, &dirty_steps);           /* FADER BANK, < > */
+#endif
         ctl_click = set.click % NCLICK == CLICK_ON || (rec == REC_ON && set.click % NCLICK != CLICK_OFF);
         if (b & (3u << BTN_OCT_DOWN)) {
             if (layer == L_EDIT) {              /* EDIT + OCT- / OCT+: undo / redo (one level: a swap) */
@@ -924,7 +969,7 @@ static void app_main(void)
         if ((e = fm1_enc_take(ENC_ALGORITHM)) != 0) {   /* ALGORITHM: the track (as sloopDX) */
             uint32_t t = e > 0 ? 1u : 0u;
             if (t != seq_trk) { seq_trk = t; step_held = -1; audition_off(); }
-            say(t ? (pat.trk[1].len ? "TRACK B" : "TRACK B IS OFF: SEQ + KNOB 4") : "TRACK A");
+            say(t ? (pat.trk[1].len ? "TRACK B" : "TRACK B IS OFF: SEQ + " NM_KNOB4) : "TRACK A");
             dirty_page = dirty_steps = dirty_tags = 1;
         }
         if ((e = fm1_enc_take(ENC_SELECT)) != 0) {   /* SELECT: the tempo, always */
@@ -939,7 +984,7 @@ static void app_main(void)
             int32_t p = PAGE[page].p[k];
             if ((e = fm1_enc_take(ENC_KNOB1 + k)) == 0) continue;
             if (e > 1 || e < -1) e *= 3;        /* a fast turn goes further */
-            if (page == PG_GLOBAL && !layer) {    /* (a held layer has the knobs, on every page) */
+            if (page == PG_GLOBAL && !layer && !SMK_PAD_HELD) {   /* (a held layer has the knobs, on every page) */
                 if (k == 0) { set.tempo = (uint8_t)clampi(set.tempo + e, 40, 240); ctl_tempo = set.tempo; }
                 else if (k == 1) set.click = (uint8_t)clampi((int32_t)(set.click % NCLICK) + (e > 0 ? 1 : -1), 0, NCLICK - 1);
                 else if (k == 2) set.midi_ch = (uint8_t)clampi(set.midi_ch + e, 0, 16);
@@ -968,6 +1013,10 @@ static void app_main(void)
             dirty_page = 1;
         }
 
+#if BOARD_SMK37
+        smk_faders(&dirty_page, &dirty_hdr, &dirty_tags);
+        smk_wheels();
+#endif
         /* MIDI in */
         while (midi_get(&st, &d1, &d2)) {
             uint32_t ch = (st & 15u) + 1u, kind = st & 0xF0u;
@@ -1085,6 +1134,9 @@ static void app_main(void)
         fm1_led_key(BTN_FX, page >= PG_CHORUS && page <= PG_REVERB);
         fm1_led_key(BTN_GLO, page >= PG_VOICE && page <= PG_GLOBAL);
         fm1_led_key(BTN_SAVE, save_armed);
+#if BOARD_SMK37
+        smk_leds();                             /* the step pads, FADER BANK, < > */
+#endif
 
         {
         /* the screen: only what changed */
@@ -1095,6 +1147,10 @@ static void app_main(void)
             uint32_t q = 0;
             t_led = fm1_ms;
             for (k = 0; k < NV; k++) q = q * 9u + ((uint32_t)ui_vlevel[k] >> 12);   /* 8 steps a LED: redraw on a change */
+#if BOARD_SMK37
+            if (smk_overlay_draw(&leds_q)) ;    /* a fader's bar, a bank, a step page */
+            else
+#endif
             if (seq_shown() || rec || rec_down || layer) draw_hints();   /* the sequencer's hints instead of the voice LEDs */
             else if (q != leds_q) { leds_q = q; draw_leds(); }
             if (page == PG_GLOBAL && fm1_ms - t_page >= 250u) dirty_page = 1;

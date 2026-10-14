@@ -31,7 +31,30 @@
 #define HALF_FRAMES 256u
 
 static volatile uint32_t fm1_ms;
+#if BOARD_SMK37
+/* the SMK-37 (hal/smk_input.h's API, as obv_smk.h uses it): keys with velocity, pads as events, 4 faders, 2 wheels,
+ * the outer keys, the pad LEDs; 8 encoders (K1 = MASTER) */
+#define FM1_NKEY 37u
+#define SMK_KEY_F3 5u
+#define HOST_NENC 8
+static struct { uint32_t notes, buttons, frames; uint8_t key_vel[FM1_NKEY], fader[4]; uint16_t wheel[2]; } fm1_in =
+    {.wheel = {535, 620}};                      /* (the wheels at rest, as a unit reads them) */
+static uint8_t smk_pad_events;
+static int32_t smk_master = 724;
+static int32_t host_q[2][64];                   /* 0: pad events, 1: outer keys (key << 8 | velocity, 0 = release) */
+static uint32_t host_qw[2], host_qr[2];
+static void host_qput(int i, int32_t v) { host_q[i][host_qw[i]++ % 64u] = v; }
+static int32_t host_qtake(int i) { return host_qr[i] == host_qw[i] ? -1 : host_q[i][host_qr[i]++ % 64u]; }
+static int32_t smk_pad_take(void) { return host_qtake(0); }
+static int32_t smk_extkey_take(void) { return host_qtake(1); }
+static uint32_t padled_rgb[16];                 /* as lcd.c: g << 16 | r << 8 | b */
+static void padled_set(uint32_t pad, uint8_t r, uint8_t g, uint8_t b) { if (pad < 16u) padled_rgb[pad] = (uint32_t)g << 16 | (uint32_t)r << 8 | b; }
+static void padled_flush(void) {}
+static void host_dump(void);                    /* (obv_smk.h) */
+#else
+#define HOST_NENC 7
 static struct { uint32_t notes, buttons; } fm1_in;
+#endif
 static uint32_t host_edges, host_rel, host_rel_next;   /* press edges, release edges (a tap's release: the call after) */
 static uint32_t fm1_input_edges(uint32_t *released)
 {
@@ -43,8 +66,8 @@ static uint32_t fm1_input_edges(uint32_t *released)
     return b;
 }
 static uint32_t fm1_input_note_edges(void) { return 0; }   /* (the script sets fm1_in.notes) */
-static int32_t host_enc[7], host_enc_pos[7];    /* detents owed to the app; the position so far (the film's log) */
-static int32_t fm1_enc_take(uint32_t e) { int32_t v = host_enc[e % 7u]; host_enc[e % 7u] = 0; return v; }
+static int32_t host_enc[HOST_NENC], host_enc_pos[HOST_NENC];   /* detents owed to the app; the position so far (the film's log) */
+static int32_t fm1_enc_take(uint32_t e) { int32_t v = host_enc[e % HOST_NENC]; host_enc[e % HOST_NENC] = 0; return v; }
 static uint64_t host_leds;                      /* bit id: LED id lit (0..13 buttons, 14..40 keys) */
 static void fm1_led_key(uint32_t id, int on) { if (on) host_leds |= (uint64_t)1 << id; else host_leds &= ~((uint64_t)1 << id); }
 static uint64_t host_glow;                      /* the dim layer (not in the film log) */
@@ -122,7 +145,12 @@ static void app_main(void);
 /* the script: at t ms, keys down (bit k = key k, 0 = F3), a button edge, a MIDI message. A script file (the second
  * argument) replaces it, a line each: "T keys MASK" (hex or decimal), "T btn ID", "T midi ST D1 D2", "T enc ID N"
  * (encoder ID turned N detents, + = clockwise), "T btndown ID" / "T btnup ID" (a button held, let go), "T end" */
-typedef struct { uint32_t t, keys; int btn; uint8_t st, d1, d2; int8_t enc, encn; } host_ev_t;
+typedef struct { uint32_t t, keys; int btn; uint8_t st, d1, d2; int8_t enc, encn; uint8_t smk, sa; uint16_t sb; } host_ev_t;
+/* SMK-37 builds (BOARD_SMK37) also: "T vel V" (the velocity of the keys pressed from now), "T pad P V" (hardware pad
+ * P hit at velocity V, V 0 = let go), "T fader F V" (0..127), "T wheel W RAW" (0 pitch, 1 mod; raw ADC 0..1023),
+ * "T xkey K V" (keybed key K 0..36 at V, 0 = let go: the outer keys 0..4, 32..36), "T dump" (pads and state);
+ * any build: "T shot" (the screen at T -> OUT-T.ppm) */
+enum { HS_NONE, HS_VEL, HS_PAD, HS_FADER, HS_WHEEL, HS_XKEY, HS_DUMP, HS_SHOT };
 static const host_ev_t SCRIPT0[] = {
     {200, 1u << 7, -1, 0, 0, 0, -1, 0},                         /* C4 */
     {700, 1u << 7 | 1u << 11 | 1u << 14, -1, 0, 0, 0, -1, 0},   /* + E4 G4: a chord */
@@ -155,6 +183,13 @@ static void read_script(const char *path)
         else if (!strcmp(what, "btndown")) { sscanf(line, "%*u %*s %d", &e.btn); e.btn += 100; }   /* held ... */
         else if (!strcmp(what, "btnup")) { sscanf(line, "%*u %*s %d", &e.btn); e.btn += 200; }     /* ... let go */
         else if (!strcmp(what, "enc")) { sscanf(line, "%*u %*s %d %d", &ea, &eb); e.enc = (int8_t)ea; e.encn = (int8_t)eb; }
+        else if (!strcmp(what, "vel")) { sscanf(line, "%*u %*s %u", &a); e.smk = HS_VEL; e.sb = (uint16_t)a; }
+        else if (!strcmp(what, "pad")) { sscanf(line, "%*u %*s %u %u", &a, &b); e.smk = HS_PAD; e.sa = (uint8_t)a; e.sb = (uint16_t)b; }
+        else if (!strcmp(what, "fader")) { sscanf(line, "%*u %*s %u %u", &a, &b); e.smk = HS_FADER; e.sa = (uint8_t)a; e.sb = (uint16_t)b; }
+        else if (!strcmp(what, "wheel")) { sscanf(line, "%*u %*s %u %u", &a, &b); e.smk = HS_WHEEL; e.sa = (uint8_t)a; e.sb = (uint16_t)b; }
+        else if (!strcmp(what, "xkey")) { sscanf(line, "%*u %*s %u %u", &a, &b); e.smk = HS_XKEY; e.sa = (uint8_t)a; e.sb = (uint16_t)b; }
+        else if (!strcmp(what, "dump")) e.smk = HS_DUMP;
+        else if (!strcmp(what, "shot")) e.smk = HS_SHOT;   /* (any board: the screen now -> OUT-<ms>.ppm) */
         else if (!strcmp(what, "midi")) { sscanf(line, "%*u %*s %i %u %u", (int *)&a, &b, &c); e.st = (uint8_t)a; e.d1 = (uint8_t)b; e.d2 = (uint8_t)c; }
         else continue;
         ev[n++] = e;
@@ -233,8 +268,29 @@ static void platform_poll(void)                 /* one call = one millisecond */
     static uint32_t step, shot, owed, frame;
     static int32_t blk[2u * HALF_FRAMES];
     fm1_ms++;
+#if BOARD_SMK37
+    fm1_in.frames++;                            /* (the SMK scans ~625 frames a second; enough for "settled") */
+#endif
     while (step < script_n && script[step].t <= fm1_ms) {
-        if (script[step].st) {
+        if (script[step].smk == HS_SHOT) {
+            write_ppm(fm1_ms);
+        } else if (script[step].smk) {
+#if BOARD_SMK37
+            static uint32_t vel = 100;
+            const host_ev_t *e = &script[step];
+            uint32_t k;
+            switch (e->smk) {
+            case HS_VEL: vel = e->sb ? e->sb : 1u; for (k = 0; k < FM1_NKEY; k++) fm1_in.key_vel[k] = (uint8_t)vel; break;
+            case HS_PAD: host_qput(0, (int32_t)((e->sa & 15u) << 8 | (e->sb & 0x7Fu))); break;
+            case HS_FADER: fm1_in.fader[e->sa & 3u] = (uint8_t)(e->sb > 127u ? 127u : e->sb); break;
+            case HS_WHEEL: fm1_in.wheel[e->sa & 1u] = e->sb; break;
+            case HS_XKEY: if (e->sb) fm1_in.key_vel[e->sa % FM1_NKEY] = (uint8_t)e->sb; host_qput(1, (int32_t)((e->sa % FM1_NKEY) << 8 | (e->sb & 0x7Fu))); break;
+            case HS_DUMP: host_dump(); break;
+            }
+#else
+            fprintf(stderr, "script: an SMK-37 event in an FM-1 build (BOARD_SMK37=0), ignored\n");
+#endif
+        } else if (script[step].st) {
             mq[mq_w % 64u][0] = script[step].st; mq[mq_w % 64u][1] = script[step].d1; mq[mq_w % 64u][2] = script[step].d2;
             mq_w++;
         } else if (script[step].btn >= 200) {
@@ -248,7 +304,7 @@ static void platform_poll(void)                 /* one call = one millisecond */
             host_rel_next |= 1u << script[step].btn;
         }
         else if (script[step].enc >= 0)
-            host_enc[script[step].enc % 7] += script[step].encn, host_enc_pos[script[step].enc % 7] += script[step].encn;
+            host_enc[script[step].enc % HOST_NENC] += script[step].encn, host_enc_pos[script[step].enc % HOST_NENC] += script[step].encn;
         else
             fm1_in.notes = script[step].keys;
         step++;
@@ -287,7 +343,7 @@ static void platform_poll(void)                 /* one call = one millisecond */
             if (!log) { snprintf(name, sizeof name, "%s-log.txt", host_out); log = fopen(name, "w"); }
             if (log) {
                 fprintf(log, "%u %u %u %u", fm1_ms, fm1_in.notes, (uint32_t)(host_leds >> 14), (uint32_t)(host_leds & 0x3FFFu));
-                for (e = 0; e < 7u; e++) fprintf(log, " %d", host_enc_pos[e]);
+                for (e = 0; e < (uint32_t)HOST_NENC; e++) fprintf(log, " %d", host_enc_pos[e]);
                 fprintf(log, "\n");
                 fflush(log);
             }
