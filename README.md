@@ -16,6 +16,8 @@ three effects after the voices. No second engine: one synth, as far as the chip 
 > function button is held on the GLOBAL page (they turned the GLOBAL settings, such as TUNE, instead of the sequencer). Do not
 > install 1.1: its USB-MIDI out is broken, and once it runs no installer gets another firmware back on (1.2 fixed it).
 
+**M-Vave SMK-37:** see [SMK-37 instructions](SMK37.md).
+
 Hear it: [the video](video/) is nine OberVaves (the host build) playing one slow, dark track; every sound in it,
 drums included, is this firmware.
 

@@ -97,6 +97,10 @@ static void smk_pads(uint32_t base, uint32_t *dirty)
         } else if (smk_pads_held >> p & 1u) {
             smk_pads_held &= ~(1u << p);
             seq_key_up(k);
+            if (!smk_pads_held && step_held >= 0 && layer != L_SEQ) {   /* (the page moved under the pad: let go) */
+                step_held = -1;
+                audition_off();
+            }
         } else {
             for (q = 0; q < SEQ_CHORD; q++) {
                 uint32_t n = smk_live[p][q];

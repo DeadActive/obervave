@@ -84,6 +84,9 @@ def main():
     st, p = state(d, 8500), pads(d, 8500)
     check("K3: track B (off): no steps, the pads dark", st["trk"] == "1" and st["len"] == "0" and not any(p), (st, p))
 
+    st = state(d, 9200)
+    check("the page moved under a held pad: let go, no step stays held", st["held"] == "-1" and st["view"] == "0", st)
+
     print("== pads while REC is on: they play")
     out, d = run("rec")
     check("REC armed: a pad plays the pen (C4) at its velocity", "MIDI out 90 60 70" in out, out[-400:])

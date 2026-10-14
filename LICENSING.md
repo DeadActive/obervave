@@ -11,6 +11,8 @@ complete source under the same licence too.
 | The platform: `firmware/hal/`, `firmware/loader/`, `crt0.S`, `app.ld`, `firmware/src/` (`usb.c`, `ota.c`, `recovery.c`, `lcd.c`, `gfx.c`, `libc.c`, `bootguard.h`, `uac_fir.h`), `tools/` | Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments ([Felucca](https://github.com/hugelton/Felucca)), with the changes of [SLOOP](https://github.com/isod89/sloop-fm1) (isod89) |
 | The platform's wiring `platform.c`, the host mode `tests/`, the docs, the build (`build.sh`, `tools/build.py`) | zvenson, as [Dinghy](https://github.com/zvenson/dinghy) |
 | The synth: `firmware/src/obervave.c`, `obv_*.h`, `firmware/gen/obv_tables.h` and `tools/gen_tables.py`, the programs, the screen, the video (`video/`) | Copyright (C) 2026 zvenson |
+| The SMK-37 board layer: `firmware/hal/smk_input.h`, `fm1_flash_map.h`, the SMK-37 parts of `fm1_cc.h`, `fm1_flash.h`, `fm1_lcd_hw.h`, `lcd.c`, `ota.c`, `bootguard.h`, `firmware/loader/`, `tools/fm1pkg_make.py`, `tools/fm1_install.py`, `tools/build.py`; `firmware/src/smk_wheel.h`; `tests/ota_test.c`, `ldr_test.c`, `install_test.py`, `smk_wheel_test.c`, `smk_pkg_test.py` | Copyright (C) 2026 M. Geisler (genkigenki/makkuro), from [genkigenki/sloop-fm1](https://github.com/genkigenki/sloop-fm1) branch `smk37` (the reference port of the [fm1-to-smk37](https://github.com/genkigenki/fm1-to-smk37) kit), on the platform above |
+| OberVave on the SMK-37: `firmware/src/obv_smk.h`, `smk_store.h`, the SMK-37 parts of `platform.c`, `obervave.c`, `obv_engine.h`, the pad event queue in `smk_input.h`, `tests/smk_ui_test.py`, `tests/smk/`, `tests/smk_flash_test.c`, `tests/run_tests.sh`, `SMK37.md`, `smk37-port.yaml` | Copyright (C) 2026 zvenson |
 
 ## Third-party material
 
@@ -22,7 +24,7 @@ complete source under the same licence too.
 
 ## Trademarks
 
-"Felucca" and "Hügelton Instruments" are names of Hügelton Instruments; "M-VAVE" and "FM-1" belong to their
-owners. OberVave is inspired by the classic 8-voice poly synths of 1979-84; "Oberheim", "OB-X" and "OB-8" are
+"Felucca" and "Hügelton Instruments" are names of Hügelton Instruments; "M-VAVE", "FM-1", "SMK-37", "MKE-P37" and
+"Starrykey" belong to their owners. OberVave is inspired by the classic 8-voice poly synths of 1979-84; "Oberheim", "OB-X" and "OB-8" are
 trademarks of their owner. OberVave is not made or endorsed by any of them, and none of these marks appear in the
 firmware itself.

@@ -45,4 +45,11 @@
 # K3 (ALGORITHM): track B (off), its pads are dark
 8400 enc 2 1
 8500 dump
-8600 end
+# a pad held, > moves the page (track B is off: back to A first), the pad let go: no step stays held
+8700 enc 2 -1
+8800 btn 3
+8900 pad 3 100
+9000 btn 3
+9100 pad 3 0
+9200 dump
+9300 end

@@ -257,8 +257,10 @@ static void smk_owner_check(void)
     if (ours)
         return;
     fl_erase4k(SETTINGS_AT, &took);
-    for (i = 0; i < NBLOB; i++)
+    for (i = 0; i < NBLOB; i++) {
+        fm1_wdt_feed();                         /* (~50 ms an erase) */
         fl_erase4k(BLOBS_AT + i * 0x1000u, &took);
+    }
     fl_erase4k(OWNER_AT, &took);
     fl_write(OWNER_AT, want, 16);
     smk_store_cleared = 1;
