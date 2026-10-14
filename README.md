@@ -16,6 +16,10 @@ three effects after the voices. No second engine: one synth, as far as the chip 
 > function button is held on the GLOBAL page (they turned the GLOBAL settings, such as TUNE, instead of the sequencer). Do not
 > install 1.1: its USB-MIDI out is broken, and once it runs no installer gets another firmware back on (1.2 fixed it).
 
+**Play it in your browser:** `docs/sim/` is the firmware itself (the same C sources, compiled to WebAssembly) with
+the FM-1's screen, keys, buttons and knobs, your computer keyboard or a MIDI keyboard. Build it with
+`sh web/sim/build.sh`, try it with `python3 -m http.server -d docs/sim` (see `web/sim/build.sh` for the two tools).
+
 **M-Vave SMK-37:** see [SMK-37 instructions](SMK37.md).
 
 Hear it: [the video](video/) is nine OberVaves (the host build) playing one slow, dark track; every sound in it,
@@ -74,6 +78,7 @@ the JieLi AC79 SDK: see Dinghy's README, "Set up once").
 ```sh
 tests/run_host.sh                 # the synth on your computer: build/host/obervave.wav and screens as PNG
 tests/run_host.sh my-script.txt   # your own keys / buttons / knob turns / MIDI over time (tests/host.c explains)
+sh web/sim/build.sh               # the browser simulator: docs/sim (zig cc + wasm-opt), node tests/sim_test.mjs
 ./build.sh                        # the device package: build/obervave.fwsc
 python3 tools/fm1_install.py build/obervave.fwsc   # onto the FM-1 over USB
 ```
