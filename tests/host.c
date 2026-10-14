@@ -11,9 +11,11 @@
  *
  * Change SCRIPT below to try your own app. */
 #include <stdint.h>
+#ifndef OBV_WASM                                /* (OBV_WASM: the browser simulator, web/sim/sim.c, brings its own few) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#endif
 #ifdef __linux__
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -147,6 +149,10 @@ static void midi_send(uint32_t st, uint32_t d1, uint32_t d2) { printf("%6u ms  M
 
 static void app_audio(int32_t *out, uint32_t n);
 static void app_main(void);
+
+#ifdef OBV_WASM
+static void platform_poll(void);                /* web/sim/sim.c: a millisecond of the page's clock, the rest is there */
+#else
 
 /* the script: at t ms, keys down (bit k = key k, 0 = F3), a button edge, a MIDI message. A script file (the second
  * argument) replaces it, a line each: "T keys MASK" (hex or decimal), "T btn ID", "T midi ST D1 D2", "T enc ID N"
@@ -374,3 +380,4 @@ int main(int argc, char **argv)
     app_main();
     return 0;
 }
+#endif
