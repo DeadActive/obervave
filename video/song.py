@@ -5,7 +5,7 @@ climbing all the way through, a rolling octave bass, four on the floor, a woozy 
 Writes scripts/<part>.txt, runs the host build (tests/run_host.sh builds it) filmed at 30 fps (f/<part>/NNNNN.png +
 f/<part>-log.txt), mixes stems/*.wav into track.wav.
 
-  python3 song.py [--scripts-only | --mix-only]"""
+  python3 song.py [--scripts-only | --mix-only | --parts kick,hat,clap]"""
 import subprocess, sys, wave, shutil
 from pathlib import Path
 import numpy as np
@@ -226,21 +226,19 @@ hat.setup(PROG["INIT"], oct=1, MODE=3, O1_WAVE=0, O2_WAVE=0, NOISE=127, FTYPE=1,
           FA=0, AA=0, AD=50, AS=70, AR=60, KEYTRK=0, VEL_AMP=90, VINTAGE=0, SPREAD=0, VOLUME=95)
 # kick and hats are OberVave's own step sequencer, programmed by hand before the music (SEQ held, the keys as steps):
 # kick 4 quarters (1 3 HARD, 2 4 NORM, half-beat gates), hats 8 eighths (closed SOFT and short, open NORM and long).
-# PLAY starts them on bar 4 / 8; GLO + key 1 mutes them for the breakdown; PLAY stops them at bar 38.
+# No drums for the first minute (the synths alone): PLAY starts both on bar 24, a clap roll leads in; PLAY stops them at bar 38.
 kick.program_steps(3600, 36, -3, -12, [(0, 1, -16), (1, 0, -16), (2, 1, -16), (3, 0, -16)])
 hat.program_steps(3600, 70, -2, -8, [(k, -1 if k % 2 == 0 else 0, -35 if k % 2 == 0 else 6) for k in range(8)])
-for d, start in ((kick, 4), (hat, 8)):
+DRUMS_IN = 24
+for d in (kick, hat):
     d.btn(T0 - 200, "SEQ")                            # the sequencer's page on their screens
-    d.btn(d.at(start) - 2, "PLAY")
-    d.glo_key(d.at(24) - 40, 0)
-    d.glo_key(d.at(28) - 40, 0)
+    d.btn(d.at(DRUMS_IN) - 2, "PLAY")
     d.btn(d.at(38) - 10, "PLAY")
-for bar in range(8, 38):
-    if 24 <= bar < 28: continue
+for bar in range(DRUMS_IN, 38):
     for beat in (1, 3):
         for k in range(3): clap.note(bar, beat + k * 0.04, 60, 100 + k * 8, .25)   # the flam of a clap
-for i in range(8): clap.note(27, 2 + i * .25, 60, 70 + i * 7, .15)   # the breakdown's end: a clap roll into the drop
-for i in range(4): clap.note(23, 2 + i * .5, 60, 85 + i * 10, .2)
+for i in range(8): clap.note(27, 2 + i * .25, 60, 70 + i * 7, .15)   # a clap roll into the drop
+for i in range(4): clap.note(DRUMS_IN - 1, 2 + i * .5, 60, 85 + i * 10, .2)   # and one that brings the drums in
 kick.note(40, 0, 36, 120, .5); clap.note(40, 0, 60, 110, .25)
 
 GAIN = {"arp": 3.6, "bass": 1.5, "pad": 1.1, "lead": 1.4, "arp2": 2.4, "strings": 1.0, "kick": 2.8, "clap": 4.2, "hat": 1.1}
@@ -270,9 +268,15 @@ def main():
         for name in parts:
             with wave.open(str(HERE / "stems" / f"{name}.wav")) as w:
                 stems[name] = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).reshape(-1, 2).astype(np.float32) / 32768
-    else:
+    else:                                             # --parts a,b: film only those again, the other stems as they are
+        only = sys.argv[sys.argv.index("--parts") + 1].split(",") if "--parts" in sys.argv else list(parts)
         with ThreadPoolExecutor(3) as ex:
-            stems = dict(zip(parts.keys(), ex.map(run, parts.values())))
+            stems = dict(zip(only, ex.map(run, [parts[p] for p in only])))
+        for name in parts:
+            if name not in stems:
+                with wave.open(str(HERE / "stems" / f"{name}.wav")) as w:
+                    stems[name] = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).reshape(-1, 2).astype(np.float32) / 32768
+        stems = {p: stems[p] for p in parts}
     n = max(len(a) for a in stems.values())
     mix = np.zeros((n, 2), np.float32)
     for name, a in stems.items():

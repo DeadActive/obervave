@@ -7,15 +7,14 @@ switching at the bottom and a camcorder's date burned in; the VCR's own letters 
 crisp on top. Every section gets its own picture of what you hear, drawn from the real data:
 
   the cassette goes in, PLAY; the logo strikes through the snow; NINE FM-1s / ONE FIRMWARE / ZERO SAMPLES punched in over a macro of the screen
-  KICK      its stem as a neon oscilloscope: a filter ringing like a sine, the pitch dropping
   ARP       the ping-pong delay made visible: echoes of the screen as it was a dotted eighth ago, left, right, left
   BASS      its waveform across the whole frame
-  SEQUENCER a VHS rewind to how the drums were set (SEQ held, a key per step), then the step rows huge, playing
   PAD       the chorus as double vision; the notes of the arp and the pad falling onto the keys
   LEAD      six ghosts of the screen drifting apart (unison, VINTAGE); the bend pulls the picture down the hole
   RESO      the bass's waveform wrapped round a circle: the resonance grows spikes
   DOWN      a tunnel of screens, turning with the pitch bend
-  REVERB    the room fills with haze as the plate opens; the claps strike like the intro's lightning
+  KICK      the drums come in after the first minute: its stem as a neon oscilloscope, a filter ringing like a sine
+  SEQUENCER a VHS rewind to how the drums were set (SEQ held, a key per step), then the step rows huge, playing
   UPSIDE    the tape pauses half a bar before the drop; then the second arp's notes rising off the keys
   MORPH     a notch cut through the screen, widening with the filter's morph
   STRINGS   the stereo field as a Lissajous figure (the voices panned across)
@@ -833,9 +832,9 @@ def s_end(t, n, fi, b):
         OSD.update(sym="play", label="PLAY", hide=t2 > 3.0)
     return im
 
-SCENES = [(0, 4, s_open), (4, 5, s_kick), (5, 8, s_arp), (8, 10, s_bass), (10, 13, s_seq), (13, 16, s_pad), (16, 20, s_lead),
-          (20, 22, s_reso), (22, 24, s_down), (24, 28, s_reverb), (28, 30, s_upside), (30, 32, s_morph), (32, 34, s_strings),
-          (34, 40, s_all), (40, 99, s_end)]
+SCENES = [(0, 4, s_open), (4, 8, s_arp), (8, 12, s_bass), (12, 16, s_pad), (16, 20, s_lead),     # the first minute: no drums
+          (20, 22, s_reso), (22, 24, s_down), (24, 25, s_kick), (25, 28, s_seq), (28, 30, s_upside), (30, 32, s_morph),
+          (32, 34, s_strings), (34, 40, s_all), (40, 99, s_end)]
 END_BAR = b0_end = 40
 PAUSE = 27.5
 NAMES = {"kick": "KICK", "arp": "ARP", "bass": "BASS", "seq": "SEQUENCER", "pad": "PAD", "lead": "LEAD", "reso": "RESO",

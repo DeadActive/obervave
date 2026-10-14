@@ -6,7 +6,7 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 ## Hard rules
 
-- Nothing from SLOOP / sloopDX / zp12 apps (no grooves, no other engines; no code from their sequencers). Only this
+- Nothing from SLOOP / sloopDX / zp12 apps (no grooves, no other engines; no code CTL from their sequencers). Only this
   one synth, as deep as possible. Exception asked for by the user on 2026-10-13: an own step sequencer in the style
   of Baud Girl's FM-1+VA (chords, ratchets, chance; Baud Girl is closed source: the idea only), two tracks sharing
   256 steps (`obv_seq.h`). Dinghy's platform (`platform.c`, `usb.c`, `ota.c`, hal/) stays as it is.
