@@ -37,8 +37,14 @@ static volatile uint32_t fm1_ms;
 #define FM1_NKEY 37u
 #define SMK_KEY_F3 5u
 #define HOST_NENC 8
-static struct { uint32_t notes, buttons, frames; uint8_t key_vel[FM1_NKEY], fader[4]; uint16_t wheel[2]; } fm1_in =
-    {.wheel = {535, 620}};                      /* (the wheels at rest, as a unit reads them) */
+static struct {
+    uint32_t notes, buttons, frames, adc_ok, adc_miss;
+    uint64_t keys;
+    uint8_t key_vel[FM1_NKEY], fader[4];
+    uint16_t wheel[2], batt, pad_raw[16], pad_base[16];
+} fm1_in = {.wheel = {535, 620}};               /* (the wheels at rest, as a unit reads them) */
+static uint8_t smk_store_cleared, smk_trim_ok;
+static uint32_t smk_jedec;
 static uint8_t smk_pad_events;
 static int32_t smk_master = 724;
 static int32_t host_q[2][64];                   /* 0: pad events, 1: outer keys (key << 8 | velocity, 0 = release) */
@@ -150,7 +156,7 @@ typedef struct { uint32_t t, keys; int btn; uint8_t st, d1, d2; int8_t enc, encn
  * P hit at velocity V, V 0 = let go), "T fader F V" (0..127), "T wheel W RAW" (0 pitch, 1 mod; raw ADC 0..1023),
  * "T xkey K V" (keybed key K 0..36 at V, 0 = let go: the outer keys 0..4, 32..36), "T dump" (pads and state);
  * any build: "T shot" (the screen at T -> OUT-T.ppm) */
-enum { HS_NONE, HS_VEL, HS_PAD, HS_FADER, HS_WHEEL, HS_XKEY, HS_DUMP, HS_SHOT };
+enum { HS_NONE, HS_VEL, HS_PAD, HS_FADER, HS_WHEEL, HS_XKEY, HS_DUMP, HS_SHOT, HS_CHECK };
 static const host_ev_t SCRIPT0[] = {
     {200, 1u << 7, -1, 0, 0, 0, -1, 0},                         /* C4 */
     {700, 1u << 7 | 1u << 11 | 1u << 14, -1, 0, 0, 0, -1, 0},   /* + E4 G4: a chord */
@@ -189,6 +195,7 @@ static void read_script(const char *path)
         else if (!strcmp(what, "wheel")) { sscanf(line, "%*u %*s %u %u", &a, &b); e.smk = HS_WHEEL; e.sa = (uint8_t)a; e.sb = (uint16_t)b; }
         else if (!strcmp(what, "xkey")) { sscanf(line, "%*u %*s %u %u", &a, &b); e.smk = HS_XKEY; e.sa = (uint8_t)a; e.sb = (uint16_t)b; }
         else if (!strcmp(what, "dump")) e.smk = HS_DUMP;
+        else if (!strcmp(what, "check")) e.smk = HS_CHECK;   /* (SMK: KNOB BANK pressed / let go: the panel check) */
         else if (!strcmp(what, "shot")) e.smk = HS_SHOT;   /* (any board: the screen now -> OUT-<ms>.ppm) */
         else if (!strcmp(what, "midi")) { sscanf(line, "%*u %*s %i %u %u", (int *)&a, &b, &c); e.st = (uint8_t)a; e.d1 = (uint8_t)b; e.d2 = (uint8_t)c; }
         else continue;
@@ -280,6 +287,7 @@ static void platform_poll(void)                 /* one call = one millisecond */
             const host_ev_t *e = &script[step];
             uint32_t k;
             switch (e->smk) {
+            case HS_CHECK: fm1_in.buttons ^= 1u; host_edges |= 1u; break;   /* KNOB BANK held / let go */
             case HS_VEL: vel = e->sb ? e->sb : 1u; for (k = 0; k < FM1_NKEY; k++) fm1_in.key_vel[k] = (uint8_t)vel; break;
             case HS_PAD: host_qput(0, (int32_t)((e->sa & 15u) << 8 | (e->sb & 0x7Fu))); break;
             case HS_FADER: fm1_in.fader[e->sa & 3u] = (uint8_t)(e->sb > 127u ? 127u : e->sb); break;

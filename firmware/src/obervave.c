@@ -1138,6 +1138,17 @@ static void app_main(void)
         smk_leds();                             /* the step pads, FADER BANK, < > */
 #endif
 
+#if BOARD_SMK37
+        {   /* KNOB BANK held: the panel check owns the screen; let go, everything is drawn again */
+            uint32_t redraw = 0;
+            if (smk_check(&redraw)) continue;
+            if (redraw) {
+                lcd_fill(0, 0, 240, 240, C_PANEL);   /* (the strips leave gaps between them) */
+                dirty_hdr = dirty_page = dirty_steps = dirty_tags = 1; hints_key = leds_q = 0xFFFFFFFFu; scope_state = 1; t_scope = 0;
+                smk_ov_dirty = 1;
+            }
+        }
+#endif
         {
         /* the screen: only what changed */
         if (dirty_hdr && fm1_ms - t_hdr >= 30u) { dirty_hdr = 0; t_hdr = fm1_ms; draw_header(); }

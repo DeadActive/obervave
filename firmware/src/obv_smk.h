@@ -19,7 +19,8 @@
  *   wheels      pitch = bend, +-2 semitones (the program's BEND range, 2 in every factory program), every voice;
  *               mod = a gentle vibrato from the program's LFO, up to +-1/2 semitone (obv_engine.h ctl_vib).
  *               Self-calibrating (smk_wheel.h)
- *   KNOB BANK   not used yet
+ *   KNOB BANK   held: the panel check (a bring-up screen in place of a serial console: the flash part, the factory
+ *               calibration, the ADC, faders, wheels, keys, buttons and every pad's reading above its baseline)
  */
 #include "smk_wheel.h"
 
@@ -244,9 +245,58 @@ static void smk_leds(void)
         padled_set(p, (uint8_t)((c >> 11) * 255u / 31u), (uint8_t)(((c >> 5) & 63u) * 255u / 63u), (uint8_t)((c & 31u) * 255u / 31u));
     }
     fm1_led_key(BTN_FADER_BANK, smk_bank != 0u);
+    fm1_led_key(BTN_KNOB_BANK, fm1_in.buttons >> BTN_KNOB_BANK & 1u);   /* (lit while the panel check is up) */
     fm1_led_key(BTN_LEFT, seq_pg[t] > 0u);
     fm1_led_key(BTN_RIGHT, seq_pg[t] + 1u < seq_pages(t));
     padled_flush();                             /* (only when a colour changed; between LCD transfers) */
+}
+
+/* ---- KNOB BANK held: the panel check (OberVave has no serial console; this is what the kit's "smk" command shows) */
+static void smk_hex(char *s, uint32_t v, uint32_t n)
+{
+    uint32_t k;
+    for (k = 0; k < n; k++) s[k] = "0123456789ABCDEF"[(v >> (4u * (n - 1u - k))) & 15u];
+    s[n] = 0;
+}
+static int smk_check(uint32_t *redraw)
+{
+    static uint32_t on, t;
+    static char ln[12][32];
+    uint32_t i, k;
+    if (!(fm1_in.buttons >> BTN_KNOB_BANK & 1u)) {
+        if (on) { on = 0; *redraw = 1; }
+        return 0;
+    }
+    if (on && fm1_ms - t < 100u) return 1;
+    on = 1;
+    t = fm1_ms;
+    for (i = 0; i < 12u; i++) ln[i][0] = 0;
+    scat(ln[0], "PANEL CHECK");
+    scat(ln[1], "FLASH "); smk_hex(ln[1] + 6, smk_jedec, 6); scat(ln[1], smk_trim_ok ? " TRIM OK" : " TRIM DEFAULT");
+    scat(ln[2], "ADC "); fmt_u(ln[2] + 4, fm1_in.adc_ok % 100000u); scat(ln[2], " MISS "); fmt_u(ln[2] + slen(ln[2]), fm1_in.adc_miss % 10000u);
+    scat(ln[3], "FADER");
+    for (k = 0; k < 4u; k++) { scat(ln[3], " "); fmt_u(ln[3] + slen(ln[3]), fm1_in.fader[k]); }
+    scat(ln[3], " BAT "); fmt_u(ln[3] + slen(ln[3]), fm1_in.batt);
+    scat(ln[4], "WHEEL "); fmt_u(ln[4] + 6, fm1_in.wheel[0]); scat(ln[4], " "); fmt_u(ln[4] + slen(ln[4]), fm1_in.wheel[1]);
+    scat(ln[4], " B"); fmt_s(ln[4] + slen(ln[4]), ctl_bend / 64); scat(ln[4], " V"); fmt_u(ln[4] + slen(ln[4]), (uint32_t)ctl_vib);
+    scat(ln[5], "BTN "); smk_hex(ln[5] + 4, fm1_in.buttons, 5);
+    for (k = 0; k < FM1_NKEY && !(fm1_in.keys >> k & 1u); k++) ;
+    if (k < FM1_NKEY) { scat(ln[5], " KEY "); fmt_u(ln[5] + slen(ln[5]), k); scat(ln[5], " V"); fmt_u(ln[5] + slen(ln[5]), fm1_in.key_vel[k]); }
+    if (smk_store_cleared) scat(ln[6], "STORE: OTHER DATA CLEARED");
+    scat(ln[7], "PADS: READING - BASELINE");
+    for (i = 0; i < 4u; i++) {                  /* pads 1-4, 5-8 (top row), 9-12, 13-16 */
+        fmt_u(ln[8 + i], 4u * i + 1u); scat(ln[8 + i], "-"); fmt_u(ln[8 + i] + slen(ln[8 + i]), 4u * i + 4u); scat(ln[8 + i], ":");
+        for (k = 4u * i; k < 4u * i + 4u; k++) {
+            int32_t d = (int32_t)fm1_in.pad_raw[k] - (int32_t)fm1_in.pad_base[k];
+            scat(ln[8 + i], " "); fmt_s(ln[8 + i] + slen(ln[8 + i]), d);
+        }
+    }
+    for (k = 0; k < 2u; k++) {
+        cv_begin(240, 120, C_PANEL);
+        for (i = 0; i < 6u; i++) cv_text(6, (int32_t)i * 19 + 4, &FONT_S, ln[6u * k + i], k == 0u && i == 0u ? C_AMBER : C_CREAM);
+        cv_blit(0, 120u * k);
+    }
+    return 1;
 }
 
 #ifdef OBV_HOST

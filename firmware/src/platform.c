@@ -241,7 +241,8 @@ static int blob_save(uint32_t i, const void *p, uint32_t n) { return i < NBLOB ?
 #if BOARD_SMK37
 /* the store's owner (the kit's convention, smk_store.h): our tag, load as ever; anything else (the stock settings,
  * another port's data) is cleared once and the tag written, before the audio starts */
-static uint8_t smk_store_cleared;
+static uint8_t smk_store_cleared, smk_trim_ok;   /* (the panel check shows them) */
+static uint32_t smk_jedec;
 static void smk_owner_check(void)
 {
     uint8_t tag[16], want[16];
@@ -267,7 +268,7 @@ static void smk_trim_read(void)
 {
     static uint8_t rec[0x22Cu];
     if (flash_ok && !st_read(SMK_TRIM_FLASH, rec, sizeof rec))
-        smk_trim_load(rec);
+        smk_trim_ok = (uint8_t)smk_trim_load(rec);
 }
 #endif
 
@@ -433,7 +434,12 @@ void fm1_cstart(void)
     fm1_boot.p3_rst = (uint8_t)p3;
     if (boot_mode == BOOT_RECOVERY || recovery_key())
         recovery_main();                        /* OCT- at power-on: the USB rescue */
+#if BOARD_SMK37
+    smk_jedec = FL_FAR(fl_jedec_ram)();         /* (the panel check shows it: units may carry another part) */
+    flash_ok = FL_JEDEC_OK(smk_jedec);
+#else
     flash_ok = FL_JEDEC_OK(FL_FAR(fl_jedec_ram)());
+#endif
     ota_boot_cleanup();
     lcd_init();
     lcd_fill(0, 0, 240, 240, C_BLACK);
