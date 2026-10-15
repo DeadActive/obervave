@@ -69,7 +69,7 @@ Everything from the FM-1 keeps its job, on the SMK button with the same meaning;
 | **K1** | MASTER | the output level (an endless knob: 24 steps of 1024 a click) |
 | **K2** | SELECT | the tempo |
 | **K3** | ALGORITHM | track A / B |
-| **K4** | PRESETS | the program |
+| **K4** | PRESETS | the program; in the sequencer: the pattern (playing: from the loop's end) |
 | **K5 · K6 · K7 · K8** | KNOB 1 · 2 · 3 · 4 | the page's four knobs, left to right as on the screen |
 | **PATCH** | HOME | PERFORM; held with a layer: lock it |
 | **PARA** | EDIT | OSC / FILTER pages; held: the erase layer |
@@ -77,8 +77,8 @@ Everything from the FM-1 keeps its job, on the SMK button with the same meaning;
 | **NOTE REPEAT** | LFO | the LFO pages |
 | **SCALE** | SEL | with BT held: a random sound |
 | **GLOBE** | GLO | GLOBAL / VOICE / OUTPUT; held: mute, solo, tap tempo |
-| **BT** | SAVE | twice: save; held: patterns 1-8 |
-| **ARP**, **FX**, **SEQ** | ARP, FX, SEQ | as on the FM-1 (SEQ held: the keys are steps) |
+| **BT** | SAVE | twice: save the program; in the sequencer: save the pattern now; held: white keys go to pattern 1-8, black keys copy there |
+| **ARP**, **FX**, **SEQ** | ARP, FX, SEQ | as on the FM-1 (SEQ tapped: the full-screen sequencer, K5 the step cursor, see the [README](README.md#the-sequencer); held: the keys are steps) |
 | **SEQ PLAY**, **SEQ REC** | PLAY, REC | start / stop; record (held 2 s: clear the track) |
 | **OCTAVE- / OCTAVE+** | OCT- / OCT+ | the octave (both: 0); SEQ held: step page; PARA held: undo / redo |
 | **16 pads** | | the step sequencer, see below |

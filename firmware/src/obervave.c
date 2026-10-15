@@ -86,6 +86,11 @@ static uint32_t smk_pads_held, smk_pad_t0, smk_step_vel;
 #define NM_SELECT "K2"
 #define NM_ALGO "K3"
 #define NM_KNOB4 "K8"
+#define NM_K1 "K5"                              /* (the short names in the sequencer's lines) */
+#define NM_K3 "K7"
+#define NM_K4 "K8"
+#define NM_PRESETS "K4"
+#define NM_SAVE "BT"
 #else
 #define SMK_PAD_HELD 0
 #define KEY_VEL(k) 100
@@ -97,6 +102,11 @@ static uint32_t smk_pads_held, smk_pad_t0, smk_step_vel;
 #define NM_SELECT "SELECT"
 #define NM_ALGO "ALGORITHM"
 #define NM_KNOB4 "KNOB 4"
+#define NM_K1 "K1"
+#define NM_K3 "K3"
+#define NM_K4 "K4"
+#define NM_PRESETS "PRESETS"
+#define NM_SAVE "SAVE"
 #endif
 static int steps_on(void) { return layer == L_SEQ && !rec; }
 static int seq_shown(void) { return is_seq_page(page) || layer == L_SEQ || layer == L_EDIT || SMK_PAD_HELD; }
@@ -1041,7 +1051,7 @@ static void seq_info_line(char *s, uint16_t *c)
         scat(s, "  OF 256");
         return;
     }
-    if (!len) { *c = C_DIMT; scat(s, t ? "B IS OFF: KNOB 1 SWITCHES ON" : "A IS OFF: KNOB 1 SWITCHES ON"); return; }
+    if (!len) { *c = C_DIMT; scat(s, t ? "B IS OFF: " NM_K1 " SWITCHES ON" : "A IS OFF: " NM_K1 " SWITCHES ON"); return; }
     {
         const step_t *st = seq_step(t, seq_cur[t] % len);
         fmt_u(s, seq_cur[t] % len + 1u);
@@ -1091,8 +1101,8 @@ static void draw_seq_slots(void)
         if (pat_queue) { scat(l1, "  NEXT: "); fmt_u(l1 + slen(l1), pat_queue); }
         c = C_CREAM;
     }
-    scat(l2, "K1 SLOT  K3 GO  K4 COPY HERE");
-    scat(l3, "PRESETS: PATTERN  SAVE: SAVE");
+    scat(l2, NM_K1 " SLOT  " NM_K3 " GO  " NM_K4 " COPY HERE");
+    scat(l3, NM_PRESETS ": PATTERN  " NM_SAVE ": SAVE");
     ui_seq_lines(l1, c, l2, l3);
 }
 
@@ -1237,7 +1247,7 @@ static void app_main(void)
                     if (layer != LL[k] || layer_lock) continue;
                     if (!layer_used && fm1_ms - layer_t < 600u) {   /* a tap: the button's pages */
                         if (LL[k] == L_SEQ) {   /* SEQ: the full-screen sequencer; there, its next view (as SLOOP) */
-                            static const char *const HINT[NSV] = {"KEYS WRITE  K1 MOVES", "MORE PER STEP", "THE TRACK: LENGTH ..", "THE 8 PATTERNS"};
+                            static const char *const HINT[NSV] = {"KEYS WRITE  " NM_K1 " MOVES", "MORE PER STEP", "THE TRACK: LENGTH ..", "THE 8 PATTERNS"};
                             if (is_seq_page(page)) seq_view = (seq_view + 1u) % NSV;
                             else { seq_back = page; np = PG_SEQ; seq_view = SV_STEPS; }
                             if (seq_view == SV_SLOTS) slot_sel = pat_queue ? pat_queue - 1u : set.pat;
@@ -1365,7 +1375,7 @@ static void app_main(void)
         if ((e = fm1_enc_take(ENC_ALGORITHM)) != 0) {   /* ALGORITHM: the track (as sloopDX) */
             uint32_t t = e > 0 ? 1u : 0u;
             if (t != seq_trk) { seq_trk = t; step_held = -1; audition_off(); }
-            say(t ? (pat.trk[1].len ? "TRACK B" : is_seq_page(page) ? "TRACK B OFF: KNOB 1 = ON" : "TRACK B IS OFF: SEQ + " NM_KNOB4) : "TRACK A");
+            say(t ? (pat.trk[1].len ? "TRACK B" : is_seq_page(page) ? "TRACK B OFF: " NM_K1 " = ON" : "TRACK B IS OFF: SEQ + " NM_KNOB4) : "TRACK A");
             dirty_page = dirty_steps = dirty_tags = 1;
         }
         if ((e = fm1_enc_take(ENC_SELECT)) != 0) {   /* SELECT: the tempo, always */
@@ -1578,7 +1588,7 @@ static void app_main(void)
                     seq_info_line(line, &c);
                     for (n = 0; same && (line[n] || info_prev[n]); n++) same = line[n] == info_prev[n];
                     if (dirty_steps) draw_seq_roll();
-                    if (dirty_steps || !same) { for (n = 0; (info_prev[n] = line[n]) != 0; n++) ; draw_seq_info(); }
+                    if (dirty_steps || !same) { n = 0; while ((info_prev[n] = line[n]) != 0) n++; draw_seq_info(); }
                 }
                 if (dirty_page) draw_seq_knobs();
                 dirty_steps = dirty_page = 0;

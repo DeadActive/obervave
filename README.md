@@ -11,10 +11,11 @@ three effects after the voices. No second engine: one synth, as far as the chip 
 
 <p align="center"><img src="docs/screen.png" width="240" alt="OberVave's screen: program 01 DARK ARP, the ARP page with four knobs, the scope, eight voice LEDs"></p>
 
-> **Status: 1.2.1, runs on the FM-1.** Install it from [thefirmwarehub.com](https://thefirmwarehub.com) or with
-> `tools/fm1_install.py docs/firmware/obervave-1.2.1.fwsc` (identity `FM-1_952`). 1.2.1 fixes the knobs while a
-> function button is held on the GLOBAL page (they turned the GLOBAL settings, such as TUNE, instead of the sequencer). Do not
-> install 1.1: its USB-MIDI out is broken, and once it runs no installer gets another firmware back on (1.2 fixed it).
+> **Status: 1.3, runs on the FM-1.** Install it from [thefirmwarehub.com](https://thefirmwarehub.com) or with
+> `tools/fm1_install.py docs/firmware/obervave-1.3.fwsc` (identity `FM-1_953`). 1.3 gives the sequencer the whole
+> screen and works it as SLOOP's step page (KNOB 1 moves the step cursor, the keys write into it), and switches and
+> saves patterns as zp12 does its loops (see [the sequencer](#the-sequencer)). Do not install 1.1: its USB-MIDI out is
+> broken, and once it runs no installer gets another firmware back on (1.2 fixed it).
 
 **Play it in your browser:** `docs/sim/` is the firmware itself (the same C sources, compiled to WebAssembly) with
 the FM-1's screen, keys, buttons and knobs, your computer keyboard or a MIDI keyboard. Build it with
@@ -37,7 +38,7 @@ drums included, is this firmware.
 | **Vintage** | Each of the 8 voice cards has its own small tune, cutoff and envelope offsets, plus a slow random walk on pitch, all scaled by one knob. SPREAD pans the cards like the originals' pan pots. |
 | **Effects** | Chorus (two taps, Hermite-interpolated). Ping-pong delay in note values of the tempo (1/16 to 1/2, dotted and triplet), with feedback tone; the time slews like a tape when it changes. Plate reverb (Dattorro's figure-of-eight tank) at the full sample rate: SIZE, DAMP, PRE-DLY, MIX. |
 | **Arpeggiator** | UP, DOWN, UP/DN, RANDOM, AS PLAYED; 1-4 octaves; 1/4 to 1/32 with triplets; gate; latch (HOLD). Sample-exact, in the audio interrupt. Follows MIDI clock. |
-| **Sequencer** | Two tracks that share 256 steps (one track can have them all, or A and B split them). A step is a chord of up to 4 notes with velocity, gate or a tie into the next step, a ratchet (1-4 hits) and a chance. Each track has its own length (polymeters), note value (1/4 to 1/32 with triplets), swing and transpose, and can be muted. Step recording (chords from the keys or MIDI, rests) and live recording into the running loop, quantized to the nearest step. 8 patterns in flash, two factory ones in D Phrygian. Sample-exact in the audio interrupt, follows MIDI clock, start and stop. Both tracks play the one OberVave sound. |
+| **Sequencer** | Two tracks that share 256 steps (one track can have them all, or A and B split them). A step is a chord of up to 4 notes with velocity, gate or a tie into the next step, a ratchet (1-4 hits) and a chance. Each track has its own length (polymeters), note value (1/4 to 1/32 with triplets), swing and transpose, and can be muted. Step recording on its own full screen (a step cursor on KNOB 1, chords from the keys or MIDI, rests, ties) and live recording into the running loop, quantized to the nearest step. 8 patterns in flash, switched at the loop's end while it plays, saved by themselves. Sample-exact in the audio interrupt, follows MIDI clock, start and stop. Both tracks play the one OberVave sound. |
 | **Programs** | 32: factory set in flash, your saves in the settings sector. 01 DARK ARP, 26 UPSIDE ARP, 29 NEON PAD are the dark ones; brass, strings, leads, basses, bells, pads, drums-from-a-filter for the rest. Hold SAVE and press the SELECT knob for a new one at random, within useful ranges. |
 | **MIDI** | USB-MIDI in and out. Notes, velocity, pitch bend (range 0-24), program change, sustain, mod wheel, clock / start / continue, MIDI channel or OMNI. CC 74 cutoff, 71 resonance, 73 / 72 amp attack / release, 5 glide, 1 mod depth, 7 volume, 64 sustain, 120 / 123 all off; every other parameter from CC 20 up in the order of the parameter table (see `firmware/src/obv_params.h` and CLAUDE.md). |
 
@@ -52,10 +53,10 @@ while a layer is held locks it open; its button lets it go.
 
 | Hold | Keys | KNOB 1 · 2 · 3 · 4 | Tap |
 | --- | --- | --- | --- |
-| **SEQ** | steps 1-16 of the page (tap: set with the last note or chord / clear; hold + a later step: one long note); black keys F#3 .. A#4: page 1-8 | NOTE · DIV · SWING · LENGTH; a step held: NOTE · LEVEL · RATCHET · GATE | the sequencer page |
+| **SEQ** | steps 1-16 of the page (tap: set with the last note or chord / clear; hold + a later step: one long note); black keys F#3 .. A#4: page 1-8 | NOTE · DIV · SWING · LENGTH; a step held: NOTE · LEVEL · RATCHET · GATE | the sequencer (full screen); again: its next view |
 | **EDIT** | erase that note (playing: as the playhead passes) | SHIFT · LENGTH x2 / 1/2 · TRANSPOSE | OSC / FILTER pages |
 | **GLO** | 1 / 2 mute track A / B, 5 / 6 solo, G5 tap tempo | - | GLOBAL (TEMPO, CLICK, MIDI CH, TUNE; the CPU time in its title) / VOICE / OUTPUT |
-| **SAVE** | 1-8: pattern 1-8 (with SELECT pressed: a random sound) | - | twice: save the program (on the sequencer page: the pattern) |
+| **SAVE** | white 1-8: go to pattern 1-8; black 1-8 (F#3 .. A#4): copy this pattern there (with SELECT pressed: a random sound) | - | twice: save the program; in the sequencer: save the pattern now |
 | **FX** | notes | CHORUS · DELAY · REVERB mix · DELAY TIME | CHORUS / DELAY / REVERB |
 
 - **PLAY** start / stop (the light flashes on the beat). **REC** playing: record now on top (chords, held notes
@@ -68,6 +69,31 @@ while a layer is held locks it open; its button lets it go.
   **ARP** the arp page; on it the ARP button is HOLD (latch).
 - The key LEDs show the notes that sound, the page buttons light for the page you are on, the eight round LEDs on
   the screen glow with each voice's envelope.
+
+## The sequencer
+
+**SEQ tapped** gives the sequencer the whole screen, as SLOOP's step page: a piano roll of the 16 steps around the
+cursor (a bar per note: its width the gate, its brightness the velocity; the cursor red, the playhead blue), the
+cursor step's notes and up to 64 steps as small cells, and the four knobs. SEQ tapped again steps through its views,
+**HOME** leaves.
+
+| View | KNOB 1 | KNOB 2 | KNOB 3 | KNOB 4 |
+| --- | --- | --- | --- | --- |
+| **STEPS** | the step cursor | NOTE (the chord moves) | GATE (to TIE) | VELOCITY |
+| **STEP+** | the step cursor | RATCHET 1-4 | CHANCE | the step ON / OFF |
+| **TRACK** | LENGTH (fast: by 16; A and B share 256) | DIV | SWING | TRANSPOSE |
+| **PATTERNS** | the slot | - | GO there | COPY this one there (twice on a used one) |
+
+- **Step entry** (STEPS, STEP+): a key or a chord goes into the cursor's step, and the cursor moves on when you let
+  go; a key held and KNOB 1 turned on makes a long note. **EDIT tapped** clears the step (a rest). MIDI notes write
+  too. **REC** records live, on every page.
+- **ALGORITHM** picks track A or B. A track that is off (B at first) gets 16 steps from KNOB 1 on any view.
+- **PRESETS** picks the pattern (1-8): stopped at once, playing from the end of track A's loop (the top line shows
+  `PAT 1>2` until then). In the sequencer PRESETS is the pattern; HOME's pages keep it for the program.
+- **Saving:** SAVE tapped saves now (playing: at the stop). A pattern also saves itself 3 s after a change once the
+  sequencer stands (the `*` after `PAT 1` goes). One left with changes while playing is saved at the stop.
+- **SAVE held + a white key 1-8** goes to that pattern, **+ a black key 1-8** copies this one there (start a
+  variation that way).
 
 ## Build and run
 

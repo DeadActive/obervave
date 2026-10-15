@@ -53,8 +53,7 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   track A's loop (`pat_q`, `ctl_pat_swap`: the ISR swaps it in, the one left goes to `pat_old` and is saved at the
   stop); SAVE tapped = save now (playing: at the stop); SAVE held + white 1-8 go, + black 1-8 copy (a used slot:
   press again). Autosave 3 s after an edit once stopped. KNOB 1 on an off track gives it 16 steps; a fast LENGTH
-  turn jumps by 16. Host scripts: tests/seq_view.txt, seq_trackb.txt, seq_patterns.txt. FM-1 only so far (the
-  user: no SMK-37 package yet).
+  turn jumps by 16. Host scripts: tests/seq_view.txt, seq_trackb.txt, seq_patterns.txt. Released in 1.3 for both boards.
   The click (set.click, the old pad byte: OFF / REC / ON / COUNT-IN, GLOBAL page KNOB 2; the CPU time moved to that
   page's title): a 6 ms square after the effects, 2.4 kHz on beat 1, 1.6 kHz else (obv_engine.h); COUNT-IN: REC
   armed + PLAY counts a bar (ctl_count, the tracks start after it, notes in it only sound).
@@ -106,7 +105,9 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 ## Status (2026-10-13, third session)
 
-Released: **1.2.1** (FM-1_952, docs/firmware, tag v1.2.1, on the hub; 1.2 replaced: a held function button's knobs
+Released: **1.3** (2026-10-15, FM-1_953, docs/firmware, tag v1.3: the full-screen sequencer as SLOOP's step page, patterns as
+zp12's loops) and **SMK-37 1.3-beta** (docs/firmware/smk37, tag smk37-v1.3-beta, still untested on a real SMK-37).
+Before: 1.2.1 (FM-1_952; 1.2 replaced: a held function button's knobs
 went to the GLOBAL page's settings). The hub reads the newest package in docs/firmware via the GitHub API from the
 Pi (`~/docker/sloopdx-site/update.sh`); 60 calls an hour without a token, so a sync can hit the limit.
 
