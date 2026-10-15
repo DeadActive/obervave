@@ -20,6 +20,10 @@ static step_t *seq_step(uint32_t t, uint32_t i) { return &pat.st[t ? SEQ_STEPS -
 
 /* main loop -> ISR */
 static volatile uint32_t ctl_seq_run, ctl_seq_restart;
+/* the next pattern, as zp12 switches loops: the main loop reads it into pat_q and sets ctl_pat_swap; the ISR swaps it
+ * in when track A starts over (the one it leaves goes to pat_old, so its edits can be saved at the stop) */
+static pattern_t pat_q, pat_old;
+static volatile uint32_t ctl_pat_swap, ctl_pat_keep, ui_pat_swapped;   /* keep: the one left goes to pat_old */
 /* ISR -> main loop: where each track is (step, and how far into it, Q8) */
 static volatile uint32_t ui_seq_pos[2], ui_seq_frac[2], ui_seq_dur[2], ui_seq_ticks, ui_seq_beat;   /* dur: frames */
 
@@ -150,6 +154,13 @@ static void seq_tick(void)
             uint32_t base = q / DIV_PER_QUARTER[k->div % NDIV], sw;
             r->cnt -= r->dur;
             r->step = r->step + 1u >= len ? 0u : r->step + 1u;
+            if (t == 0u && r->step == 0u && ctl_pat_swap) {   /* track A from the top: the next pattern */
+                if (ctl_pat_keep) pat_old = pat;
+                pat = pat_q;
+                ctl_pat_swap = 0;
+                ui_pat_swapped++;
+                len = k->len;
+            }
             sw = base * (uint32_t)(clampi(k->swing, 50, 75) - 50) / 50u;
             r->dur = r->step & 1u ? base - sw : base + sw;   /* swing: the first of each pair longer */
             if (r->dur < CTL) r->dur = CTL;

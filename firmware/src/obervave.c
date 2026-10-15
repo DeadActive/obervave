@@ -64,7 +64,7 @@ static const char *const SV_NAME[NSV] = {"STEPS", "STEP+", "TRACK", "PATTERNS"};
 static uint32_t seq_view, slot_sel, pat_used, pat_next, arm_k, arm_t, entry_n, pat_edit_t, pend_slot, pat_save_say;
 static uint8_t entry_on_note[128];              /* the keys writing into the cursor step now */
 static uint16_t slot_len[NBLOB][2];             /* the saved patterns' track lengths (the PATTERNS view) */
-static pattern_t pend_pat;                      /* a pattern left with edits while playing: written when stopped */
+static uint32_t pat_queue, copy_to, copy_arm, copy_arm_t;   /* pat_queue: the next pattern + 1 (playing: at A's loop end) */
 enum { CLICK_OFF, CLICK_REC, CLICK_ON, CLICK_COUNT, NCLICK };   /* COUNT: as REC, and REC armed + PLAY counts in a bar */
 static const char *const CLICK_NAME[NCLICK] = {"OFF", "REC", "ON", "COUNT-IN"};
 /* the panel as sloopDX's: a function button tapped (let go, nothing else touched) opens its pages; held, it is a
@@ -558,7 +558,7 @@ static void draw_hints(void)
     else if (layer == L_SEQ) ui_hints("WHITE KEYS = STEPS  OCT: PAGE", "F#3-A#4: PAGE 1-8 " NM_HOME ": LOCK", C_AMBER);
     else if (layer == L_EDIT) ui_hints("KEY: ERASE THAT NOTE", "OCT-: UNDO  OCT+: REDO", C_AMBER);
     else if (layer == L_GLO) ui_hints("KEY 1 2: MUTE A B  5 6: SOLO", "LAST KEY (G5): TAP TEMPO", C_AMBER);
-    else if (layer == L_SAVE) ui_hints("WHITE KEYS 1-8: PATTERN 1-8", "+ " NM_SELBTN " PRESSED: NEW SOUND", C_AMBER);
+    else if (layer == L_SAVE) ui_hints("WHITE 1-8: GO  BLACK 1-8: COPY", "+ " NM_SELBTN " PRESSED: NEW SOUND", C_AMBER);
     else if (layer == L_FX) ui_hints("KNOBS: CHORUS DELAY REVERB", "AND THE DELAY'S TIME", C_AMBER);
     else ui_hints(ROT[r][0], ROT[r][1], C_CREAM);
 }
@@ -805,30 +805,54 @@ static void slot_saved(uint32_t n, const pattern_t *p)
     slot_len[n][1] = p->trk[1].len;
 }
 
-/* another pattern. This one's edits are written first: now when stopped, else they wait in RAM for the stop */
+/* another pattern, now (stopped). This one's edits are written first; a pattern left while playing (pat_old, from
+ * the ISR's swap) waits there for the stop */
 static void pat_switch(uint32_t n)
 {
     static char msg[20];
     n %= NPAT;
+    if (n != set.pat && pat_edited) { pat_dirty = 1; pat_next = n + 1u; return; }   /* saved when quiet, then loaded */
+    if (n != set.pat) load_pattern(n);
+    slot_sel = n;
+    set_dirty = 1; set_t = fm1_ms;
+    msg[0] = 0; scat(msg, "PATTERN "); fmt_u(msg + slen(msg), n + 1u);
+    if (!(pat_used >> n & 1u) && !pat_edited) scat(msg, " (NEW)");
+    say(msg);
+}
+
+/* as zp12's loops: stopped, at once; playing, from the end of track A's loop (the ISR swaps pat_q in) */
+static void pat_go(uint32_t n)
+{
+    static char msg[20];
+    n %= NPAT;
+    if (pat_queue) { ctl_pat_swap = 0; pat_queue = 0; }
+    if (!ctl_seq_run) { pat_switch(n); return; }
+    if (n == set.pat) { say("STAYS"); return; }
+    if (pend_slot && pat_edited) { say("STOP ONCE: THE LAST ONE SAVES"); return; }
+    ctl_pat_keep = !pend_slot;                  /* (pat_old free: the one left keeps its edits for the stop) */
+    if (blob_load(n, &pat_q, sizeof pat_q) || pat_q.magic != PAT_MAGIC) pat_factory(n, &pat_q);
+    pat_queue = n + 1u;
+    ctl_pat_swap = 1;
+    msg[0] = 0; scat(msg, "PATTERN "); fmt_u(msg + slen(msg), n + 1u); scat(msg, " NEXT");
+    say(msg);
+}
+
+/* SAVE held + a black key: this pattern into slot n (a used one: press again); written when stopped and quiet */
+static void pat_copy(uint32_t n)
+{
+    static char msg[24];
+    n %= NPAT;
     msg[0] = 0;
-    if (n == set.pat) {
-        if (pat_edited) { load_pattern(n); scat(msg, "BACK TO SAVED "); }
-        else scat(msg, "PATTERN ");
-        fmt_u(msg + slen(msg), n + 1u);
+    if (n == set.pat) { say("THAT IS THIS ONE"); return; }
+    if (pat_used >> n & 1u && (copy_arm != n + 1u || fm1_ms - copy_arm_t > 3000u)) {
+        copy_arm = n + 1u; copy_arm_t = fm1_ms;
+        scat(msg, "AGAIN: OVERWRITE "); fmt_u(msg + slen(msg), n + 1u);
         say(msg);
         return;
     }
-    if (pat_edited) {
-        if (!ctl_seq_run) { pat_dirty = 1; pat_next = n + 1u; return; }   /* saved when quiet, then loaded */
-        if (pend_slot && pend_slot != set.pat + 1u) { say("STOP ONCE: THE LAST ONE SAVES"); return; }
-        pend_pat = pat;
-        pend_slot = set.pat + 1u;
-    }
-    load_pattern(n);
-    slot_sel = n;
-    set_dirty = 1; set_t = fm1_ms;
-    scat(msg, "PATTERN "); fmt_u(msg + slen(msg), n + 1u);
-    say(msg);
+    copy_arm = 0;
+    copy_to = n + 1u;
+    say(ctl_seq_run ? "COPIES WHEN STOPPED" : "COPYING");
 }
 
 static void pat_save_to(uint32_t n)             /* the pattern now into slot n (written when stopped and quiet) */
@@ -860,16 +884,10 @@ static void seq_view_turn(uint32_t knob, int32_t e)
     seqtrk_t *tk = &pat.trk[t];
     int32_t sg = e > 0 ? 1 : -1;
     step_t *st;
-    if (seq_view == SV_SLOTS) {                 /* SLOT; LOAD / SAVE: two clicks (the first arms) */
-        if (knob == 0) { slot_sel = (uint32_t)clampi((int32_t)slot_sel + sg, 0, NPAT - 1); arm_k = 0; }
-        else if (knob >= 2u && e > 0) {
-            if (arm_k != knob + 1u || fm1_ms - arm_t > 1500u) { arm_k = knob + 1u; arm_t = fm1_ms; say(knob == 2u ? "AGAIN: LOAD" : "AGAIN: SAVE"); return; }
-            arm_k = 0;
-            if (knob == 2u) {
-                if (!(pat_used >> slot_sel & 1u) && slot_sel != set.pat) say("EMPTY: STARTS EMPTY");
-                pat_switch(slot_sel);
-            } else pat_save_to(slot_sel);
-        }
+    if (seq_view == SV_SLOTS) {                 /* SLOT; GO there; COPY this one there */
+        if (knob == 0) slot_sel = (uint32_t)clampi((int32_t)slot_sel + sg, 0, NPAT - 1);
+        else if (knob == 2u && e > 0) pat_go(slot_sel);
+        else if (knob == 3u && e > 0) pat_copy(slot_sel);
         return;
     }
     if (seq_view == SV_TRACK || (!len && knob == 0)) {   /* LENGTH (A and B share 256 steps; B 0 = off; a track off:
@@ -925,7 +943,7 @@ static void seq_view_turn(uint32_t knob, int32_t e)
 static void seq_view_knob(knob_view_t *k, uint32_t i)
 {
     static const char *const L[NSV][4] = {{"STEP", "NOTE", "GATE", "VELO"}, {"STEP", "RATCHET", "CHANCE", "ON/OFF"},
-                                          {"LENGTH", "DIV", "SWING", "TRANSP"}, {"SLOT", "", "LOAD", "SAVE"}};
+                                          {"LENGTH", "DIV", "SWING", "TRANSP"}, {"SLOT", "", "GO", "COPY"}};
     uint32_t t = seq_trk, len = pat.trk[t].len, n;
     seqtrk_t *tk = &pat.trk[t];
     const step_t *st = seq_step(t, len ? seq_cur[t] % len : 0u);
@@ -935,7 +953,8 @@ static void seq_view_knob(knob_view_t *k, uint32_t i)
     k->bip = 0; k->v = 0; k->max = 0;
     if (seq_view == SV_SLOTS) {
         if (i == 0) { fmt_u(v, slot_sel + 1u); k->v = (int32_t)slot_sel; k->max = NPAT - 1; }
-        else if (i >= 2u) scat(v, arm_k == i + 1u && fm1_ms - arm_t <= 1500u ? "AGAIN" : "TURN 2x");
+        else if (i == 2u) scat(v, slot_sel == set.pat ? "HERE" : "TURN");
+        else if (i == 3u) scat(v, copy_arm == slot_sel + 1u && fm1_ms - copy_arm_t <= 3000u ? "AGAIN" : "TURN");
         return;
     }
     if (seq_view == SV_TRACK) {
@@ -971,6 +990,7 @@ static void draw_seq_top(void)
     mid[0] = right[0] = 0;
     scat(mid, "PAT "); fmt_u(mid + slen(mid), set.pat + 1u);
     if (pat_edited) scat(mid, "*");
+    if (pat_queue) { scat(mid, ">"); fmt_u(mid + slen(mid), pat_queue); }
     if (pat.trk[t].mute) scat(mid, " MUTE");
     fmt_u(right, ctl_ext_quarter ? 60u * FS / ctl_ext_quarter : set.tempo);
     scat(right, rec == REC_ON ? "  REC" : rec == REC_READY ? "  ARMED" : ctl_seq_run ? "  PLAY" : "  STOP");
@@ -1012,6 +1032,7 @@ static void seq_info_line(char *s, uint16_t *c)
     *c = C_AMBER;
     if (layer == L_SEQ) { scat(s, step_held >= 0 ? "KNOBS EDIT THE HELD STEP" : "WHITE KEYS = 16 STEPS"); return; }
     if (layer == L_EDIT) { scat(s, "KEY: ERASE  OCT: UNDO/REDO"); return; }
+    if (layer == L_SAVE) { scat(s, "WHITE 1-8: GO  BLACK: COPY"); return; }
     if (layer) { scat(s, "LET GO: BACK"); return; }
     *c = C_CREAM;
     if (seq_view == SV_TRACK) {
@@ -1065,9 +1086,13 @@ static void draw_seq_slots(void)
     ui_seq_slots(p, pat_used, slot_sel, set.pat, pat_edited);
     l1[0] = l2[0] = l3[0] = 0;
     if (toast && fm1_ms - toast_t < 1500u) scat(l1, toast);
-    else { scat(l1, "PLAYING: PATTERN "); fmt_u(l1 + slen(l1), set.pat + 1u); scat(l1, pat_edited ? " (EDITED)" : ""); c = C_CREAM; }
-    scat(l2, "K1 SLOT  K3 LOAD  K4 SAVE");
-    scat(l3, "SAVE TAPPED: SAVE IN THE SLOT");
+    else {
+        scat(l1, "NOW: PATTERN "); fmt_u(l1 + slen(l1), set.pat + 1u); scat(l1, pat_edited ? "*" : "");
+        if (pat_queue) { scat(l1, "  NEXT: "); fmt_u(l1 + slen(l1), pat_queue); }
+        c = C_CREAM;
+    }
+    scat(l2, "K1 SLOT  K3 GO  K4 COPY HERE");
+    scat(l3, "PRESETS: PATTERN  SAVE: SAVE");
     ui_seq_lines(l1, c, l2, l3);
 }
 
@@ -1099,7 +1124,7 @@ static uint32_t cycle_page(uint32_t first, uint32_t count)   /* a button steps t
 static void app_main(void)
 {
     uint32_t prev = 0, k, i, dirty_hdr = 1, dirty_page = 1, dirty_tags = 1, t_led = 0, t_scope = 0, t_page = 0, t_hdr = 0, leds_q = 1;
-    uint32_t clk_n = 0, clk_t0 = 0, clk_last = 0, leds_prev = 0xFFFFFFFFu, glow = 0, glow_prev = 0xFFFFFFFFu, t_steps = 0, ticks_seen = 0, dirty_steps = 1;
+    uint32_t swap_seen = 0, clk_n = 0, clk_t0 = 0, clk_last = 0, leds_prev = 0xFFFFFFFFu, glow = 0, glow_prev = 0xFFFFFFFFu, t_steps = 0, ticks_seen = 0, dirty_steps = 1;
     uint8_t held_key[27] = {0}, key_step[27] = {0};
     rnd = 0xC0FFEE42u;
 #if BOARD_SMK37
@@ -1153,10 +1178,10 @@ static void app_main(void)
                 else if (key_step[k] == 4u) {   /* SAVE held: white keys 1-8 = pattern 1-8 */
                     static char msg[16];
                     layer_used = 1;
-                    if (KEY_STEP[k] >= 0 && KEY_STEP[k] < (int32_t)NPAT) {
-                        if ((uint32_t)KEY_STEP[k] != set.pat) pat_switch((uint32_t)KEY_STEP[k]);
+                    if (KEY_STEP[k] >= 0 && KEY_STEP[k] < (int32_t)NPAT) {   /* white 1-8: go there; black 1-8: copy there */
+                        if ((uint32_t)KEY_STEP[k] != set.pat || pat_queue) pat_go((uint32_t)KEY_STEP[k]);
                         else { msg[0] = 0; scat(msg, "PATTERN "); fmt_u(msg + slen(msg), set.pat + 1u); say(msg); }
-                    }
+                    } else if (KEY_PAGE[k] >= 0) pat_copy((uint32_t)KEY_PAGE[k]);
                 } else {
                     note_event(1, held_key[k], KEY_VEL(k)); midi_send(0x90, held_key[k], KEY_VEL(k));
                     if (!live.v[P_ARP_MODE]) rec_note(1, held_key[k], KEY_VEL(k));
@@ -1212,9 +1237,10 @@ static void app_main(void)
                     if (layer != LL[k] || layer_lock) continue;
                     if (!layer_used && fm1_ms - layer_t < 600u) {   /* a tap: the button's pages */
                         if (LL[k] == L_SEQ) {   /* SEQ: the full-screen sequencer; there, its next view (as SLOOP) */
-                            static const char *const HINT[3] = {"KEYS WRITE  K1 MOVES", "MORE PER STEP", "THE TRACK: LENGTH .."};
-                            if (is_seq_page(page)) seq_view = seq_view >= SV_TRACK ? SV_STEPS : seq_view + 1u;
+                            static const char *const HINT[NSV] = {"KEYS WRITE  K1 MOVES", "MORE PER STEP", "THE TRACK: LENGTH ..", "THE 8 PATTERNS"};
+                            if (is_seq_page(page)) seq_view = (seq_view + 1u) % NSV;
                             else { seq_back = page; np = PG_SEQ; seq_view = SV_STEPS; }
+                            if (seq_view == SV_SLOTS) slot_sel = pat_queue ? pat_queue - 1u : set.pat;
                             say(HINT[seq_view]);
                             entry_reset();
                         } else if (LL[k] == L_EDIT && is_seq_page(page) && seq_view <= SV_MORE) seq_clear_cursor();
@@ -1222,8 +1248,7 @@ static void app_main(void)
                         else if (LL[k] == L_FX) np = cycle_page(PG_CHORUS, 3);
                         else if (LL[k] == L_GLO) np = page == PG_GLOBAL ? PG_VOICE : page == PG_VOICE ? PG_OUTPUT : PG_GLOBAL;
                         else if (is_seq_page(page)) {   /* in the sequencer: PATTERNS; there, save in the slot */
-                            if (seq_view == SV_SLOTS) pat_save_to(slot_sel);
-                            else { seq_view = SV_SLOTS; slot_sel = set.pat; arm_k = 0; say("PATTERNS: 8 SLOTS"); }
+                            pat_save_to(set.pat);   /* (as zp12: SAVE saves now; playing, at the stop) */
                             entry_reset();
                         } else if (save_armed) {      /* SAVE tapped twice: the program */
                             { set.user[prog] = live; set.used |= 1u << prog; set.prog = (uint8_t)prog; edited = 0; set_dirty = 1; set_t = fm1_ms; }
@@ -1328,7 +1353,11 @@ static void app_main(void)
         }
 
         /* encoders */
-        if ((e = fm1_enc_take(ENC_PRESETS)) != 0) {
+        if ((e = fm1_enc_take(ENC_PRESETS)) != 0 && is_seq_page(page)) {   /* in the sequencer: the pattern (as zp12) */
+            uint32_t from = pat_queue ? pat_queue - 1u : set.pat;
+            pat_go((uint32_t)clampi((int32_t)from + (e > 0 ? 1 : -1), 0, NPAT - 1));
+            dirty_hdr = dirty_page = dirty_steps = 1;
+        } else if (e) {
             load_program((uint32_t)((int32_t)prog + e + (int32_t)NPROG * 4) % NPROG);
             set.prog = (uint8_t)prog; set_dirty = 1; set_t = fm1_ms;
             dirty_hdr = dirty_page = dirty_tags = 1;
@@ -1473,6 +1502,9 @@ static void app_main(void)
         } else if (layer == L_SAVE) {           /* the pattern now lit, the others glow */
             static const uint8_t WK[8] = {0, 2, 4, 6, 7, 9, 11, 12};
             for (k = 0; k < NPAT; k++) { if (k == set.pat) lit |= 1u << WK[k]; else glow |= 1u << WK[k]; }
+            for (k = 0; k < 27u; k++)            /* the black keys: copy targets, glowing where a pattern is saved */
+                if (KEY_PAGE[k] >= 0 && pat_used >> KEY_PAGE[k] & 1u) glow |= 1u << k;
+            if (pat_queue && (fm1_ms / 200u) & 1u) lit |= 1u << WK[pat_queue - 1u];   /* the next one blinks */
         } else {
             for (k = 0; k < NV; k++)
                 if (ui_vlevel[k] > 300 && ui_vnote[k] >= base && ui_vnote[k] < base + 27u)
@@ -1598,10 +1630,29 @@ static void app_main(void)
             if (!pat_edit_t) pat_edit_t = fm1_ms | 1u;
             else if (fm1_ms - pat_edit_t > 3000u && !ctl_seq_run && !rec && step_held < 0 && !entry_n && !layer) pat_dirty = 1;
         }
-        if ((pat_dirty || pend_slot) && !ctl_seq_run && engine_quiet()) {
+        if (ui_pat_swapped != swap_seen) {      /* the ISR swapped the next pattern in (track A from the top) */
+            static char msg[16];
+            swap_seen = ui_pat_swapped;
+            if (pat_edited && ctl_pat_keep) pend_slot = set.pat + 1u;   /* the one left: saved at the stop */
+            set.pat = (uint8_t)(pat_queue ? pat_queue - 1u : set.pat);
+            pat_queue = 0;
+            seq_cur[0] = seq_cur[1] = seq_pg[0] = seq_pg[1] = 0;
+            pat_edited = 0; pat_edit_t = 0; slot_sel = set.pat;
+            set_dirty = 1; set_t = fm1_ms;
+            msg[0] = 0; scat(msg, "PATTERN "); fmt_u(msg + slen(msg), set.pat + 1u);
+            say(msg);
+            dirty_page = dirty_steps = dirty_hdr = 1;
+        }
+        if (pat_queue && !ctl_seq_run) {        /* stopped before the loop's end: now */
+            uint32_t n = pat_queue - 1u;
+            ctl_pat_swap = 0; pat_queue = 0;
+            pat_switch(n);
+            dirty_page = dirty_steps = dirty_hdr = 1;
+        }
+        if ((pat_dirty || pend_slot || copy_to) && !ctl_seq_run && engine_quiet()) {
             static char msg[20];
             if (pend_slot) {
-                if (!blob_save(pend_slot - 1u, &pend_pat, sizeof pend_pat)) slot_saved(pend_slot - 1u, &pend_pat);
+                if (!blob_save(pend_slot - 1u, &pat_old, sizeof pat_old)) slot_saved(pend_slot - 1u, &pat_old);
                 pend_slot = 0;
             }
             if (pat_dirty) {
@@ -1610,6 +1661,12 @@ static void app_main(void)
                 if (pat_save_say) {                 /* (by itself, or before a load: no message) */ msg[0] = 0; scat(msg, bad ? "SAVE FAILED " : "SAVED IN "); fmt_u(msg + slen(msg), set.pat + 1u); say(msg); }
                 pat_dirty = pat_edited = pat_save_say = 0;
                 pat_edit_t = 0;
+            }
+            if (copy_to) {
+                int bad = blob_save(copy_to - 1u, &pat, sizeof pat);
+                if (!bad) slot_saved(copy_to - 1u, &pat);
+                msg[0] = 0; scat(msg, bad ? "COPY FAILED " : "COPIED TO "); fmt_u(msg + slen(msg), copy_to); say(msg);
+                copy_to = 0;
             }
             dirty_page = dirty_steps = dirty_hdr = 1;
         }
