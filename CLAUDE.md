@@ -105,8 +105,8 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 ## Status (2026-10-13, third session)
 
-Released: **1.3** (2026-10-15, FM-1_953, docs/firmware, tag v1.3: the full-screen sequencer as SLOOP's step page, patterns as
-zp12's loops) and **SMK-37 1.3-beta** (docs/firmware/smk37, tag smk37-v1.3-beta, still untested on a real SMK-37).
+Released: **1.3.1** (2026-10-15, FM-1_953, tag v1.3.1: the tracks coloured, A blue / B orange) after **1.3** (tag v1.3: the full-screen sequencer as SLOOP's step page, patterns as
+zp12's loops) and **SMK-37 1.3.1-beta** (docs/firmware/smk37, tag smk37-v1.3.1-beta, still untested on a real SMK-37).
 Before: 1.2.1 (FM-1_952; 1.2 replaced: a held function button's knobs
 went to the GLOBAL page's settings). The hub (thefirmwarehub.com, hosted at Hetzner, the
 user 2026-10-15; its catalogue: fm1.designburgapps.com/catalog.json) reads the newest package in docs/firmware via
