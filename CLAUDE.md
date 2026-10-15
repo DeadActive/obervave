@@ -43,6 +43,15 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   DIV / SWING / LENGTH; set steps lit, playhead inverts, keys 1 5 9 13 glow. ALGORITHM = track A/B, SELECT =
   tempo, OCT both = octave 0, PERFORM = CUTOFF RESO ENV AMT RELEASE. REC / PLAY / REC held 2 s as before; patterns
   start empty; REC with the arp records the arp's notes. HOLD stays on the ARP button on its page.
+  **SEQ tapped (2026-10-15, the user: "wie Sloop, Steps mit dem Rädchen anfahren, das ganze Display")**: the
+  full-screen sequencer (`seq_view`: STEPS / STEP+ / TRACK, SEQ tapped again cycles, HOME leaves; drawn by
+  `ui_seq_*` in obv_ui.h in four strips: top line, piano roll of the cursor's 16, info line + 64-step overview,
+  knob strip). KNOB 1 = step cursor, keys write note/chord into it and the cursor goes on when let go (key held +
+  KNOB 1 = tie on), EDIT tapped clears the step; STEPS: NOTE GATE VELO, STEP+: RATCHET CHANCE ON/OFF, TRACK: LENGTH
+  DIV SWING TRANSP. SAVE tapped there = PATTERNS (8 slots, K1 slot, K3 LOAD / K4 SAVE two clicks, SAVE tapped
+  again = save in the slot). Patterns autosave into their slot 3 s after an edit once stopped; a pattern left with
+  edits while playing waits in `pend_pat` for the stop. Host script: tests/seq_view.txt. FM-1 only so far (the
+  user: no SMK-37 package yet).
   The click (set.click, the old pad byte: OFF / REC / ON / COUNT-IN, GLOBAL page KNOB 2; the CPU time moved to that
   page's title): a 6 ms square after the effects, 2.4 kHz on beat 1, 1.6 kHz else (obv_engine.h); COUNT-IN: REC
   armed + PLAY counts a bar (ctl_count, the tracks start after it, notes in it only sound).

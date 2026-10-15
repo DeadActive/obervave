@@ -58,6 +58,13 @@ static uint32_t step_held_t, step_turned, step_midi, toast_t;
 static uint8_t audition[SEQ_CHORD];             /* the held step's notes sounding (stopped: you hear what you hold) */
 static const char *toast;
 static int is_seq_page(uint32_t pg) { return pg == PG_SEQ; }
+/* the full-screen sequencer's views (SEQ tapped steps through the first three; SAVE tapped there: PATTERNS) */
+enum { SV_STEPS, SV_MORE, SV_TRACK, SV_SLOTS, NSV };
+static const char *const SV_NAME[NSV] = {"STEPS", "STEP+", "TRACK", "PATTERNS"};
+static uint32_t seq_view, slot_sel, pat_used, pat_next, arm_k, arm_t, entry_n, pat_edit_t, pend_slot, pat_save_say;
+static uint8_t entry_on_note[128];              /* the keys writing into the cursor step now */
+static uint16_t slot_len[NBLOB][2];             /* the saved patterns' track lengths (the PATTERNS view) */
+static pattern_t pend_pat;                      /* a pattern left with edits while playing: written when stopped */
 enum { CLICK_OFF, CLICK_REC, CLICK_ON, CLICK_COUNT, NCLICK };   /* COUNT: as REC, and REC armed + PLAY counts in a bar */
 static const char *const CLICK_NAME[NCLICK] = {"OFF", "REC", "ON", "COUNT-IN"};
 /* the panel as sloopDX's: a function button tapped (let go, nothing else touched) opens its pages; held, it is a
@@ -129,6 +136,13 @@ static void load_pattern(uint32_t n)            /* the saved one, else the facto
     set.pat = (uint8_t)n;
     seq_cur[0] = seq_cur[1] = seq_pg[0] = seq_pg[1] = 0;
     pat_edited = 0;
+    pat_edit_t = 0;
+}
+
+static void seq_cursor_set(uint32_t t, uint32_t n)   /* the cursor, and the roll's 16 with it */
+{
+    seq_cur[t] = n;
+    seq_pg[t] = n / 16u;
 }
 
 static void undo_save(void) { undo_pat = pat; undo_ok = 1; }
@@ -734,8 +748,337 @@ static void glo_key(uint32_t k)
     pat_edited = 1;
 }
 
+/* ---- the full-screen sequencer, as SLOOP's STEP page: KNOB 1 moves the cursor, the keys write their note or
+ * chord into the cursor's step and the cursor goes on when they are let go (a key held + KNOB 1 on: a long note),
+ * EDIT tapped clears the step. REC records live as on every page. */
+static int entry_active(void)
+{
+    return is_seq_page(page) && seq_view <= SV_MORE && !rec && !layer && step_held < 0 && pat.trk[seq_trk].len;
+}
+
+static void entry_note(uint32_t on, uint32_t note, uint32_t vel)
+{
+    uint32_t t = seq_trk, len = pat.trk[t].len, k;
+    step_t *st;
+    note &= 127u;
+    if (!on) {
+        if (!entry_on_note[note]) return;
+        entry_on_note[note] = 0;
+        if (entry_n && !--entry_n && len) seq_cursor_set(t, (seq_cur[t] + 1u) % len);   /* all let go: the next step */
+        return;
+    }
+    if (!entry_active() || entry_on_note[note]) return;
+    if (seq_cur[t] >= len) seq_cursor_set(t, 0);
+    st = seq_step(t, seq_cur[t]);
+    if (!entry_n) {                             /* the first key: the step's notes are replaced */
+        undo_save();
+        if (!st->note[0] || st->ratch & STEP_OFF) step_clear(st);
+        for (k = 0; k < SEQ_CHORD; k++) st->note[k] = 0;
+        if (st->gate >= GATE_TIE) st->gate = 96;
+        st->ratch &= (uint8_t)~STEP_OFF;
+        st->vel = (uint8_t)(vel ? vel : 100u);
+    }
+    step_add(st, (uint32_t)clampi((int32_t)note - pat.trk[t].transp, 1, 127), st->vel);
+    entry_on_note[note] = 1;
+    entry_n++;
+    pat_edited = 1;
+}
+
+static void entry_reset(void) { entry_n = 0; memset(entry_on_note, 0, sizeof entry_on_note); }
+
+static void slot_lens_read(void)                /* which slots hold a pattern (undo_pat as the buffer: only at boot) */
+{
+    uint32_t i;
+    pat_used = 0;
+    for (i = 0; i < NPAT; i++)
+        if (!blob_load(i, &undo_pat, sizeof undo_pat) && undo_pat.magic == PAT_MAGIC) {
+            pat_used |= 1u << i;
+            slot_len[i][0] = undo_pat.trk[0].len;
+            slot_len[i][1] = undo_pat.trk[1].len;
+        }
+}
+
+static void slot_saved(uint32_t n, const pattern_t *p)
+{
+    pat_used |= 1u << n;
+    slot_len[n][0] = p->trk[0].len;
+    slot_len[n][1] = p->trk[1].len;
+}
+
+/* another pattern. This one's edits are written first: now when stopped, else they wait in RAM for the stop */
+static void pat_switch(uint32_t n)
+{
+    static char msg[20];
+    n %= NPAT;
+    msg[0] = 0;
+    if (n == set.pat) {
+        if (pat_edited) { load_pattern(n); scat(msg, "BACK TO SAVED "); }
+        else scat(msg, "PATTERN ");
+        fmt_u(msg + slen(msg), n + 1u);
+        say(msg);
+        return;
+    }
+    if (pat_edited) {
+        if (!ctl_seq_run) { pat_dirty = 1; pat_next = n + 1u; return; }   /* saved when quiet, then loaded */
+        if (pend_slot && pend_slot != set.pat + 1u) { say("STOP ONCE: THE LAST ONE SAVES"); return; }
+        pend_pat = pat;
+        pend_slot = set.pat + 1u;
+    }
+    load_pattern(n);
+    slot_sel = n;
+    set_dirty = 1; set_t = fm1_ms;
+    scat(msg, "PATTERN "); fmt_u(msg + slen(msg), n + 1u);
+    say(msg);
+}
+
+static void pat_save_to(uint32_t n)             /* the pattern now into slot n (written when stopped and quiet) */
+{
+    n %= NPAT;
+    if (n != set.pat && pend_slot == n + 1u) pend_slot = 0;   /* (what waited for that slot is overwritten anyway) */
+    set.pat = (uint8_t)n;
+    set_dirty = 1; set_t = fm1_ms;
+    pat_dirty = 1;
+    pat_edited = 1;
+    pat_save_say = 1;
+    say(ctl_seq_run ? "SAVES WHEN STOPPED" : "SAVING");
+}
+
+static void seq_clear_cursor(void)              /* EDIT tapped: the cursor's step empty, the cursor on */
+{
+    uint32_t t = seq_trk, len = pat.trk[t].len;
+    if (!len) return;
+    undo_save();
+    step_clear(seq_step(t, seq_cur[t] % len));
+    seq_cursor_set(t, (seq_cur[t] + 1u) % len);
+    pat_edited = 1;
+    say("STEP CLEARED");
+}
+
+static void seq_view_turn(uint32_t knob, int32_t e)
+{
+    uint32_t t = seq_trk, len = pat.trk[t].len, k;
+    seqtrk_t *tk = &pat.trk[t];
+    int32_t sg = e > 0 ? 1 : -1;
+    step_t *st;
+    if (seq_view == SV_SLOTS) {                 /* SLOT; LOAD / SAVE: two clicks (the first arms) */
+        if (knob == 0) { slot_sel = (uint32_t)clampi((int32_t)slot_sel + sg, 0, NPAT - 1); arm_k = 0; }
+        else if (knob >= 2u && e > 0) {
+            if (arm_k != knob + 1u || fm1_ms - arm_t > 1500u) { arm_k = knob + 1u; arm_t = fm1_ms; say(knob == 2u ? "AGAIN: LOAD" : "AGAIN: SAVE"); return; }
+            arm_k = 0;
+            if (knob == 2u) {
+                if (!(pat_used >> slot_sel & 1u) && slot_sel != set.pat) say("EMPTY: STARTS EMPTY");
+                pat_switch(slot_sel);
+            } else pat_save_to(slot_sel);
+        }
+        return;
+    }
+    if (seq_view == SV_TRACK) {                 /* LENGTH (A and B share 256 steps; B 0 = off), DIV, SWING, TRANSPOSE */
+        if (knob == 0) {
+            tk->len = (uint16_t)clampi((int32_t)tk->len + e, t ? 0 : 1, (int32_t)(SEQ_STEPS - pat.trk[t ^ 1u].len));
+            if (tk->len && seq_cur[t] >= tk->len) seq_cursor_set(t, tk->len - 1u);
+        } else if (knob == 1) tk->div = (uint8_t)clampi((int32_t)tk->div + sg, 0, NDIV - 1);
+        else if (knob == 2) tk->swing = (uint8_t)clampi((int32_t)tk->swing + e, 50, 75);
+        else tk->transp = (int8_t)clampi(tk->transp + sg, -24, 24);
+        pat_edited = 1;
+        return;
+    }
+    if (!len) return;
+    if (knob == 0) {                            /* the cursor; keys held: the note goes on into the next step */
+        if (entry_n && e > 0) {
+            uint32_t n = seq_cur[t] % len;
+            if (n + 1u >= len) return;
+            st = seq_step(t, n);
+            st->gate = GATE_TIE;
+            *seq_step(t, n + 1u) = *st;
+            seq_step(t, n + 1u)->gate = 110;
+            seq_step(t, n + 1u)->ratch = 0;
+            seq_cursor_set(t, n + 1u);
+            pat_edited = 1;
+            return;
+        }
+        seq_cursor_set(t, (uint32_t)(((int32_t)(seq_cur[t] % len) + e % (int32_t)len + (int32_t)len) % (int32_t)len));
+        return;
+    }
+    st = seq_step(t, seq_cur[t] % len);
+    if (seq_view == SV_STEPS && knob == 1) {    /* NOTE: the chord moves; an empty step gets the last notes played */
+        if (!st->note[0]) {
+            step_clear(st);
+            for (k = 0; k < (pen_n ? pen_n : 1u) && k < SEQ_CHORD; k++) st->note[k] = pen_n ? pen_chord[k] : (uint8_t)pen;
+        } else for (k = 0; k < SEQ_CHORD && st->note[k]; k++) st->note[k] = (uint8_t)clampi(st->note[k] + sg, 1, 127);
+        st->ratch &= (uint8_t)~STEP_OFF;
+    } else if (!st->note[0]) { say("EMPTY STEP: PLAY A NOTE"); return; }
+    else if (seq_view == SV_STEPS && knob == 2) st->gate = (uint8_t)clampi((int32_t)st->gate + e * 2, 1, GATE_TIE);
+    else if (seq_view == SV_STEPS) st->vel = (uint8_t)clampi((int32_t)st->vel + e * 2, 1, 127);
+    else if (knob == 1) st->ratch = (uint8_t)((st->ratch & STEP_OFF) | (uint32_t)clampi((int32_t)(st->ratch & 3u) + sg, 0, 3));
+    else if (knob == 2) st->chance = (uint8_t)clampi((int32_t)st->chance + sg * 5, 0, 100);
+    else st->ratch = (uint8_t)(e > 0 ? st->ratch & ~STEP_OFF : st->ratch | STEP_OFF);
+    pat_edited = 1;
+}
+
+static void seq_view_knob(knob_view_t *k, uint32_t i)
+{
+    static const char *const L[NSV][4] = {{"STEP", "NOTE", "GATE", "VELO"}, {"STEP", "RATCHET", "CHANCE", "ON/OFF"},
+                                          {"LENGTH", "DIV", "SWING", "TRANSP"}, {"SLOT", "", "LOAD", "SAVE"}};
+    uint32_t t = seq_trk, len = pat.trk[t].len, n;
+    seqtrk_t *tk = &pat.trk[t];
+    const step_t *st = seq_step(t, len ? seq_cur[t] % len : 0u);
+    char *v = k->value;
+    k->label = L[seq_view][i];
+    k->present = k->label[0] != 0;
+    k->bip = 0; k->v = 0; k->max = 0;
+    if (seq_view == SV_SLOTS) {
+        if (i == 0) { fmt_u(v, slot_sel + 1u); k->v = (int32_t)slot_sel; k->max = NPAT - 1; }
+        else if (i >= 2u) scat(v, arm_k == i + 1u && fm1_ms - arm_t <= 1500u ? "AGAIN" : "TURN 2x");
+        return;
+    }
+    if (seq_view == SV_TRACK) {
+        if (i == 0) { if (tk->len) fmt_u(v, tk->len); else scat(v, "OFF"); k->v = tk->len; k->max = 64; }
+        else if (i == 1) { scat(v, DIV_NAME[tk->div % NDIV]); k->v = tk->div; k->max = NDIV - 1; }
+        else if (i == 2) { fmt_u(v, tk->swing); scat(v, "%"); k->v = tk->swing - 50; k->max = 25; }
+        else { fmt_s(v, tk->transp); k->v = tk->transp + 24; k->max = 48; k->bip = 1; }
+        return;
+    }
+    if (!len) { if (i == 0) scat(v, "OFF"); return; }
+    if (i == 0) { fmt_u(v, seq_cur[t] % len + 1u); scat(v, "/"); fmt_u(v + slen(v), len); k->v = (int32_t)(seq_cur[t] % len); k->max = (int32_t)len - 1; return; }
+    if (!st->note[0]) { scat(v, "--"); return; }
+    if (seq_view == SV_STEPS) {
+        if (i == 1) {
+            for (n = 0; n < SEQ_CHORD && st->note[n]; n++) ;
+            fmt_note(v, st->note[0]);
+            if (n > 1u) { scat(v, "+"); fmt_u(v + slen(v), n - 1u); }
+            k->v = st->note[0]; k->max = 127;
+        } else if (i == 2) { if (st->gate >= GATE_TIE) scat(v, "TIE"); else { fmt_u(v, (st->gate * 100u + 63u) / 127u); scat(v, "%"); } k->v = st->gate; k->max = 127; }
+        else { fmt_u(v, st->vel); k->v = st->vel; k->max = 127; }
+    } else {
+        if (i == 1) { fmt_u(v, (st->ratch & 3u) + 1u); scat(v, "x"); k->v = st->ratch & 3u; k->max = 3; }
+        else if (i == 2) { fmt_u(v, st->chance); scat(v, "%"); k->v = st->chance; k->max = 100; }
+        else { scat(v, st->ratch & STEP_OFF ? "OFF" : "ON"); k->v = !(st->ratch & STEP_OFF); k->max = 1; }
+    }
+}
+
+/* the full screen: what to draw (the main loop calls these when something changed) */
+static void draw_seq_top(void)
+{
+    static char mid[16], right[20];
+    uint32_t t = seq_trk;
+    mid[0] = right[0] = 0;
+    scat(mid, "PAT "); fmt_u(mid + slen(mid), set.pat + 1u);
+    if (pat_edited) scat(mid, "*");
+    if (pat.trk[t].mute) scat(mid, " MUTE");
+    fmt_u(right, ctl_ext_quarter ? 60u * FS / ctl_ext_quarter : set.tempo);
+    scat(right, rec == REC_ON ? "  REC" : rec == REC_READY ? "  ARMED" : ctl_seq_run ? "  PLAY" : "  STOP");
+    ui_seq_top(t, layer == L_SEQ ? "SEQ KEYS" : layer == L_EDIT ? "ERASE" : SV_NAME[seq_view], mid, right,
+               rec ? C_RED : ctl_seq_run ? C_AMBER : C_DIMT);
+}
+
+static int32_t seq_playhead(void)
+{
+    uint32_t len = pat.trk[seq_trk].len;
+    return ctl_seq_run && len && !ctl_count ? (int32_t)(ui_seq_pos[seq_trk] % len) : -1;
+}
+
+static uint32_t seq_w0(void)                    /* the roll's first step: the cursor's 16 (recording: the playhead's) */
+{
+    int32_t ph = seq_playhead();
+    if (rec == REC_ON && ph >= 0) return (uint32_t)ph / 16u * 16u;
+    return seq_pg[seq_trk] * 16u;
+}
+
+static void draw_seq_roll(void)
+{
+    uint32_t t = seq_trk;
+    ui_seq_roll(t, seq_w0(), rec == REC_ON || !pat.trk[t].len ? -1 : (int32_t)(seq_cur[t] % pat.trk[t].len), seq_playhead());
+}
+
+/* the line over the overview: a message, the recording, a held layer's keys, else what the cursor's step holds */
+static void seq_info_line(char *s, uint16_t *c)
+{
+    uint32_t t = seq_trk, len = pat.trk[t].len, k;
+    *c = C_AMBER;
+    s[0] = 0;
+    if (toast && fm1_ms - toast_t < 1500u) { scat(s, toast); return; }
+    *c = C_RED;
+    if (rec_down && fm1_ms - rec_down_t > 700u) { scat(s, "KEEP HOLDING: CLEAR TRACK"); return; }
+    if (rec == REC_ON && ui_seq_count) { scat(s, "COUNT-IN "); fmt_u(s + slen(s), 5u - ui_seq_count); return; }
+    if (rec == REC_ON) { scat(s, "RECORDING: PLAY ON TOP"); return; }
+    if (rec == REC_READY) { scat(s, "REC READY: FIRST NOTE STARTS"); return; }
+    *c = C_AMBER;
+    if (layer == L_SEQ) { scat(s, step_held >= 0 ? "KNOBS EDIT THE HELD STEP" : "WHITE KEYS = 16 STEPS"); return; }
+    if (layer == L_EDIT) { scat(s, "KEY: ERASE  OCT: UNDO/REDO"); return; }
+    if (layer) { scat(s, "LET GO: BACK"); return; }
+    *c = C_CREAM;
+    if (seq_view == SV_TRACK) {
+        scat(s, "A "); fmt_u(s + slen(s), pat.trk[0].len);
+        scat(s, "  B "); if (pat.trk[1].len) fmt_u(s + slen(s), pat.trk[1].len); else scat(s, "OFF");
+        scat(s, "  OF 256");
+        return;
+    }
+    if (!len) { *c = C_DIMT; scat(s, "TRACK OFF: SEQ 3x, LENGTH"); return; }
+    {
+        const step_t *st = seq_step(t, seq_cur[t] % len);
+        fmt_u(s, seq_cur[t] % len + 1u);
+        scat(s, ":");
+        if (!st->note[0]) { scat(s, " EMPTY - PLAY A KEY"); *c = C_DIMT; return; }
+        for (k = 0; k < SEQ_CHORD && st->note[k]; k++) {
+            char nn[6];
+            fmt_note(nn, (uint32_t)clampi(st->note[k] + pat.trk[t].transp, 1, 127));
+            scat(s, " "); scat(s, nn);
+        }
+        if (st->ratch & STEP_OFF) scat(s, " (OFF)");
+    }
+}
+
+static void draw_seq_info(void)
+{
+    static char line[40], right[12];
+    uint32_t t = seq_trk, len = pat.trk[t].len, w0 = seq_w0();
+    uint16_t c;
+    seq_info_line(line, &c);
+    right[0] = 0;
+    if (len > 64u && slen(line) < 22u) {        /* which 64 the cells show */
+        uint32_t a = w0 / 64u * 64u;
+        fmt_u(right, a + 1u); scat(right, "-"); fmt_u(right + slen(right), a + 64u < len ? a + 64u : len);
+    }
+    ui_seq_info(t, line, c, right[0] ? right : 0, w0, rec == REC_ON || !len ? -1 : (int32_t)(seq_cur[t] % len), seq_playhead());
+}
+
+static void draw_seq_slots(void)
+{
+    static char txt[NBLOB][12], l1[40], l2[32], l3[32];
+    const char *p[NBLOB];
+    uint32_t i;
+    uint16_t c = C_AMBER;
+    for (i = 0; i < NPAT; i++) {
+        uint32_t a = i == set.pat ? pat.trk[0].len : slot_len[i][0], b = i == set.pat ? pat.trk[1].len : slot_len[i][1];
+        txt[i][0] = 0;
+        if (!(pat_used >> i & 1u) && i != set.pat) scat(txt[i], "EMPTY");
+        else { scat(txt[i], "A"); fmt_u(txt[i] + slen(txt[i]), a); if (b) { scat(txt[i], " B"); fmt_u(txt[i] + slen(txt[i]), b); } }
+        p[i] = txt[i];
+    }
+    ui_seq_slots(p, pat_used, slot_sel, set.pat, pat_edited);
+    l1[0] = l2[0] = l3[0] = 0;
+    if (toast && fm1_ms - toast_t < 1500u) scat(l1, toast);
+    else { scat(l1, "PLAYING: PATTERN "); fmt_u(l1 + slen(l1), set.pat + 1u); scat(l1, pat_edited ? " (EDITED)" : ""); c = C_CREAM; }
+    scat(l2, "K1 SLOT  K3 LOAD  K4 SAVE");
+    scat(l3, "SAVE TAPPED: SAVE IN THE SLOT");
+    ui_seq_lines(l1, c, l2, l3);
+}
+
+static void draw_seq_knobs(void)
+{
+    knob_view_t k[4];
+    uint32_t i;
+    for (i = 0; i < 4u; i++) {
+        k[i].value[0] = 0; k[i].bip = 0; k[i].present = 0;
+        if (layer == L_SEQ || step_held >= 0) seq_knob(&k[i], i);
+        else if (layer) layer_knob(&k[i], i);
+        else seq_view_knob(&k[i], i);
+    }
+    ui_seq_knobs(k);
+}
+
 /* ---- the main loop */
-#define KEY0 53u                                /* key 0 = F3 */
+#define KEY0 53u                               /* key 0 = F3 */
 #if BOARD_SMK37
 #include "obv_smk.h"                            /* the SMK-37's pads, outer keys, faders, wheels, < >, FADER BANK */
 #endif
@@ -771,6 +1114,8 @@ static void app_main(void)
     ctl_tune8 = set.tune * 256 / 100;
     load_program(set.prog);
     load_pattern(set.pat);
+    slot_lens_read();
+    slot_sel = set.pat;
     ctl_panic = 0;
 
     ui_splash();
@@ -802,14 +1147,14 @@ static void app_main(void)
                     static char msg[16];
                     layer_used = 1;
                     if (KEY_STEP[k] >= 0 && KEY_STEP[k] < (int32_t)NPAT) {
-                        if ((uint32_t)KEY_STEP[k] != set.pat) { load_pattern((uint32_t)KEY_STEP[k]); set_dirty = 1; set_t = fm1_ms; }
-                        msg[0] = 0; scat(msg, "PATTERN "); fmt_u(msg + slen(msg), set.pat + 1u);
-                        say(msg);
+                        if ((uint32_t)KEY_STEP[k] != set.pat) pat_switch((uint32_t)KEY_STEP[k]);
+                        else { msg[0] = 0; scat(msg, "PATTERN "); fmt_u(msg + slen(msg), set.pat + 1u); say(msg); }
                     }
                 } else {
                     note_event(1, held_key[k], KEY_VEL(k)); midi_send(0x90, held_key[k], KEY_VEL(k));
                     if (!live.v[P_ARP_MODE]) rec_note(1, held_key[k], KEY_VEL(k));
                     pen_add(held_key[k]);
+                    entry_note(1, held_key[k], KEY_VEL(k));   /* the full-screen sequencer: into the cursor's step */
                 }
                 dirty_steps = dirty_page = 1;
             }
@@ -820,6 +1165,7 @@ static void app_main(void)
                     note_event(0, held_key[k], 0); midi_send(0x80, held_key[k], 0);
                     if (!live.v[P_ARP_MODE]) rec_note(0, held_key[k], 0);
                     if (notes_down) notes_down--;
+                    entry_note(0, held_key[k], 0);
                 }
                 dirty_steps = dirty_page = 1;
             }
@@ -851,20 +1197,29 @@ static void app_main(void)
                 if (b & (1u << LB[k])) {
                     if (layer_lock) { layer = L_NONE; layer_lock = 0; dead |= 1u << LB[k]; }
                     else { layer = LL[k]; layer_used = 0; layer_t = fm1_ms; layer_btn = LB[k]; }
-                    step_held = -1; audition_off();
+                    step_held = -1; audition_off(); entry_reset();
                     dirty_page = dirty_steps = dirty_tags = 1; hints_key = 0xFFFFFFFFu; leds_q = 0xFFFFFFFFu;
                 }
                 if (rel & (1u << LB[k])) {
                     if (dead & (1u << LB[k])) { dead &= ~(1u << LB[k]); continue; }
                     if (layer != LL[k] || layer_lock) continue;
                     if (!layer_used && fm1_ms - layer_t < 600u) {   /* a tap: the button's pages */
-                        if (LL[k] == L_SEQ) np = is_seq_page(page) ? seq_back : (seq_back = page, PG_SEQ);
+                        if (LL[k] == L_SEQ) {   /* SEQ: the full-screen sequencer; there, its next view (as SLOOP) */
+                            static const char *const HINT[3] = {"KEYS WRITE  K1 MOVES", "MORE PER STEP", "THE TRACK: LENGTH .."};
+                            if (is_seq_page(page)) seq_view = seq_view >= SV_TRACK ? SV_STEPS : seq_view + 1u;
+                            else { seq_back = page; np = PG_SEQ; seq_view = SV_STEPS; }
+                            say(HINT[seq_view]);
+                            entry_reset();
+                        } else if (LL[k] == L_EDIT && is_seq_page(page) && seq_view <= SV_MORE) seq_clear_cursor();
                         else if (LL[k] == L_EDIT) np = cycle_page(PG_OSC1, 5);
                         else if (LL[k] == L_FX) np = cycle_page(PG_CHORUS, 3);
                         else if (LL[k] == L_GLO) np = page == PG_GLOBAL ? PG_VOICE : page == PG_VOICE ? PG_OUTPUT : PG_GLOBAL;
-                        else if (save_armed) {      /* SAVE tapped twice: the program, or on the sequencer page the pattern */
-                            if (is_seq_page(page)) pat_dirty = 1;
-                            else { set.user[prog] = live; set.used |= 1u << prog; set.prog = (uint8_t)prog; edited = 0; set_dirty = 1; set_t = fm1_ms; }
+                        else if (is_seq_page(page)) {   /* in the sequencer: PATTERNS; there, save in the slot */
+                            if (seq_view == SV_SLOTS) pat_save_to(slot_sel);
+                            else { seq_view = SV_SLOTS; slot_sel = set.pat; arm_k = 0; say("PATTERNS: 8 SLOTS"); }
+                            entry_reset();
+                        } else if (save_armed) {      /* SAVE tapped twice: the program */
+                            { set.user[prog] = live; set.used |= 1u << prog; set.prog = (uint8_t)prog; edited = 0; set_dirty = 1; set_t = fm1_ms; }
                             save_armed = 0;
                             dirty_hdr = 1;
                         } else { save_armed = 1; save_t = fm1_ms; }
@@ -957,6 +1312,11 @@ static void app_main(void)
         if (save_armed && fm1_ms - save_t > 3000u) { save_armed = 0; dirty_page = 1; }
         if (np != page) {
             if (layer_lock) { layer = L_NONE; layer_lock = 0; }
+            if (is_seq_page(np) != is_seq_page(page)) {   /* into / out of the full-screen sequencer: all new */
+                lcd_fill(0, 0, 240, 240, C_PANEL);
+                dirty_hdr = dirty_tags = 1; scope_state = 1; t_scope = 0;
+            }
+            entry_reset();
             page = np; dirty_page = dirty_steps = 1; step_held = -1; audition_off(); hints_key = 0xFFFFFFFFu; leds_q = 0xFFFFFFFFu;
         }
 
@@ -990,6 +1350,9 @@ static void app_main(void)
                 else if (k == 2) set.midi_ch = (uint8_t)clampi(set.midi_ch + e, 0, 16);
                 else { set.tune = (int8_t)clampi(set.tune + e, -50, 50); ctl_tune8 = set.tune * 256 / 100; }
                 set_dirty = 1; set_t = fm1_ms;
+            } else if (is_seq_page(page) && !layer && step_held < 0) {   /* the full-screen sequencer's view */
+                seq_view_turn(k, e);
+                dirty_steps = 1;
             } else if (layer == L_EDIT) {
                 edit_turn(k, e);
                 dirty_steps = 1;
@@ -1041,6 +1404,7 @@ static void app_main(void)
             if (set.midi_ch && ch != set.midi_ch) continue;
             if (kind == 0x90u && d2) {
                 note_event(1, d1, d2); if (!live.v[P_ARP_MODE]) rec_note(1, d1, d2); pen_add(d1);
+                if (step_held < 0) entry_note(1, d1, d2);
                 if (step_held >= 0 && !rec) {   /* a held step takes what MIDI plays: the first note starts the chord */
                     step_t *sp = seq_step(seq_trk, (uint32_t)step_held);
                     uint32_t q;
@@ -1051,7 +1415,11 @@ static void app_main(void)
                 }
                 dirty_steps = dirty_page = 1;
             }
-            else if (kind == 0x80u || kind == 0x90u) { note_event(0, d1, 0); if (!live.v[P_ARP_MODE]) rec_note(0, d1, 0); if (notes_down) notes_down--; dirty_page |= rec; }
+            else if (kind == 0x80u || kind == 0x90u) {
+                note_event(0, d1, 0); if (!live.v[P_ARP_MODE]) rec_note(0, d1, 0); if (notes_down) notes_down--;
+                entry_note(0, d1, 0);
+                dirty_page |= rec || is_seq_page(page); dirty_steps = 1;
+            }
             else if (kind == 0xE0u) ctl_bend = (int32_t)(d1 | d2 << 7) - 8192;
             else if (kind == 0xC0u) { load_program(d1); dirty_hdr = dirty_page = dirty_tags = 1; set.prog = (uint8_t)prog; }
             else if (kind == 0xB0u) {
@@ -1102,7 +1470,7 @@ static void app_main(void)
             for (k = 0; k < NV; k++)
                 if (ui_vlevel[k] > 300 && ui_vnote[k] >= base && ui_vnote[k] < base + 27u)
                     lit |= 1u << (ui_vnote[k] - base);
-            if (rec && !ctl_seq_run && pat.trk[seq_trk].len) {   /* recording: the keys of the selected step */
+            if ((rec || entry_active()) && !ctl_seq_run && pat.trk[seq_trk].len) {   /* recording, writing: the keys of the cursor's step */
                 const step_t *st = seq_step(seq_trk, seq_cur[seq_trk] % pat.trk[seq_trk].len);
                 for (k = 0; k < SEQ_CHORD && st->note[k]; k++)
                     if (st->note[k] >= base && st->note[k] < base + 27u) lit |= 1u << (st->note[k] - base);
@@ -1151,6 +1519,32 @@ static void app_main(void)
 #endif
         {
         /* the screen: only what changed */
+        if (is_seq_page(page)) {                /* the full-screen sequencer: its own strips */
+            static uint32_t top_key, t_seq, info_key;
+            static char info_prev[40];
+            uint32_t tk = (ctl_ext_quarter ? 60u * FS / ctl_ext_quarter : set.tempo) | rec << 8 | ctl_seq_run << 10 | (uint32_t)set.pat << 11
+                        | pat_edited << 14 | (uint32_t)pat.trk[seq_trk].mute << 15 | layer << 16 | seq_view << 20 | seq_trk << 23;
+            uint32_t ik = (toast && fm1_ms - toast_t < 1500u ? toast_t + 1u : 0u) ^ (arm_k && fm1_ms - arm_t <= 1500u ? 0x80000000u : 0u);
+            if (ui_seq_ticks != ticks_seen) { ticks_seen = ui_seq_ticks; dirty_steps = 1; }
+            if (dirty_hdr || dirty_tags) { dirty_hdr = dirty_tags = 0; top_key = 0xFFFFFFFFu; }
+            if (ik != info_key) { info_key = ik; dirty_page = 1; if (seq_view == SV_SLOTS) dirty_steps = 1; }
+            if (fm1_ms - t_seq >= 30u) {
+                t_seq = fm1_ms;
+                if (tk != top_key) { top_key = tk; draw_seq_top(); }
+                if (seq_view == SV_SLOTS && !layer) { if (dirty_steps) draw_seq_slots(); }
+                else {
+                    char line[40];
+                    uint16_t c;
+                    uint32_t n, same = 1;
+                    seq_info_line(line, &c);
+                    for (n = 0; same && (line[n] || info_prev[n]); n++) same = line[n] == info_prev[n];
+                    if (dirty_steps) draw_seq_roll();
+                    if (dirty_steps || !same) { for (n = 0; (info_prev[n] = line[n]) != 0; n++) ; draw_seq_info(); }
+                }
+                if (dirty_page) draw_seq_knobs();
+                dirty_steps = dirty_page = 0;
+            }
+        } else {
         if (dirty_hdr && fm1_ms - t_hdr >= 30u) { dirty_hdr = 0; t_hdr = fm1_ms; draw_header(); }
         if (dirty_page && fm1_ms - t_page >= 30u) { dirty_page = 0; t_page = fm1_ms; draw_page(); }
         if (dirty_tags) { dirty_tags = 0; draw_tags(); }
@@ -1185,16 +1579,38 @@ static void app_main(void)
             for (i = 0; i < SCOPE_N; i++) scope[i] = 0;
             draw_scope();
         }
-
+        }
         }
         if (set_dirty && !ctl_seq_run && engine_quiet() && fm1_ms - set_t > 2000u) {   /* when silent: an erase stalls the sound */
             settings_save(&set, sizeof set);
             set_dirty = 0;
         }
-        if (pat_dirty && !ctl_seq_run && engine_quiet()) {
-            blob_save(set.pat, &pat, sizeof pat);
-            pat_dirty = pat_edited = 0;
-            dirty_page = 1;
+        /* the patterns: saved by themselves (3 s after an edit, once stopped), as asked, or left while playing;
+         * only when stopped and quiet (an erase stalls the sound) */
+        if (pat_edited && !pat_dirty) {
+            if (!pat_edit_t) pat_edit_t = fm1_ms | 1u;
+            else if (fm1_ms - pat_edit_t > 3000u && !ctl_seq_run && !rec && step_held < 0 && !entry_n && !layer) pat_dirty = 1;
+        }
+        if ((pat_dirty || pend_slot) && !ctl_seq_run && engine_quiet()) {
+            static char msg[20];
+            if (pend_slot) {
+                if (!blob_save(pend_slot - 1u, &pend_pat, sizeof pend_pat)) slot_saved(pend_slot - 1u, &pend_pat);
+                pend_slot = 0;
+            }
+            if (pat_dirty) {
+                int bad = blob_save(set.pat, &pat, sizeof pat);
+                if (!bad) slot_saved(set.pat, &pat);
+                if (pat_save_say) {                 /* (by itself, or before a load: no message) */ msg[0] = 0; scat(msg, bad ? "SAVE FAILED " : "SAVED IN "); fmt_u(msg + slen(msg), set.pat + 1u); say(msg); }
+                pat_dirty = pat_edited = pat_save_say = 0;
+                pat_edit_t = 0;
+            }
+            dirty_page = dirty_steps = dirty_hdr = 1;
+        }
+        if (pat_next && !pat_dirty) {           /* a load that waited for the save */
+            uint32_t n = pat_next - 1u;
+            pat_next = 0;
+            pat_switch(n);
+            dirty_page = dirty_steps = dirty_hdr = 1;
         }
     }
 }
