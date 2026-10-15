@@ -1004,8 +1004,9 @@ static void draw_seq_top(void)
     if (pat.trk[t].mute) scat(mid, " MUTE");
     fmt_u(right, ctl_ext_quarter ? 60u * FS / ctl_ext_quarter : set.tempo);
     scat(right, rec == REC_ON ? "  REC" : rec == REC_READY ? "  ARMED" : ctl_seq_run ? "  PLAY" : "  STOP");
+    ui_trk = t;
     ui_seq_top(t, layer == L_SEQ ? "SEQ KEYS" : layer == L_EDIT ? "ERASE" : SV_NAME[seq_view], mid, right,
-               rec ? C_RED : ctl_seq_run ? C_AMBER : C_DIMT);
+               rec ? C_RED : ctl_seq_run ? C_AMBER : C_DIMT, pat.trk[1].len == 0);
 }
 
 static int32_t seq_playhead(void)
@@ -1024,6 +1025,7 @@ static uint32_t seq_w0(void)                    /* the roll's first step: the cu
 static void draw_seq_roll(void)
 {
     uint32_t t = seq_trk;
+    ui_trk = t;
     ui_seq_roll(t, seq_w0(), rec == REC_ON || !pat.trk[t].len ? -1 : (int32_t)(seq_cur[t] % pat.trk[t].len), seq_playhead());
 }
 
@@ -1031,7 +1033,7 @@ static void draw_seq_roll(void)
 static void seq_info_line(char *s, uint16_t *c)
 {
     uint32_t t = seq_trk, len = pat.trk[t].len, k;
-    *c = C_AMBER;
+    *c = seq_trk ? C_TRK_B : C_AMBER;           /* (messages in the track's colour) */
     s[0] = 0;
     if (toast && fm1_ms - toast_t < 1500u) { scat(s, toast); return; }
     *c = C_RED;
@@ -1072,6 +1074,7 @@ static void draw_seq_info(void)
     uint32_t t = seq_trk, len = pat.trk[t].len, w0 = seq_w0();
     uint16_t c;
     seq_info_line(line, &c);
+    ui_trk = t;
     right[0] = 0;
     if (len > 64u && slen(line) < 22u) {        /* which 64 the cells show */
         uint32_t a = w0 / 64u * 64u;
@@ -1116,6 +1119,7 @@ static void draw_seq_knobs(void)
         else if (layer) layer_knob(&k[i], i);
         else seq_view_knob(&k[i], i);
     }
+    ui_trk = seq_trk;
     ui_seq_knobs(k);
 }
 

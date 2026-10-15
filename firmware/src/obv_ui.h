@@ -271,14 +271,29 @@ static void ui_hints(const char *l1, const char *l2, uint16_t c1)
  *             the velocity), the cursor framed in red, the playhead blue, step numbers under every beat
  *   136..187  a line (what the step holds, or a message), then up to 64 steps as small cells (the roll's 16 lit)
  *   188..239  the four knobs as label, value and a bar */
-static void ui_seq_top(uint32_t t, const char *view, const char *mid, const char *right, uint16_t rc)
+/* the tracks' colours, everywhere in the sequencer (the user: "not always clear if you are in A or B"): A the light
+ * blue accent, B orange; ui_trk is the track drawn */
+#define C_TRK_B RGB(255, 150, 40)
+static uint32_t ui_trk;
+#define C_TRK (ui_trk ? C_TRK_B : C_AMBER)
+
+static void ui_seq_top(uint32_t t, const char *view, const char *mid, const char *right, uint16_t rc, uint32_t b_off)
 {
-    char tl[2] = {(char)(t ? 'B' : 'A'), 0};
+    uint32_t i;
     cv_begin(240, 24, C_PANEL);
-    cv_rect(3, 3, 17, 17, C_AMBER);
-    cv_text(12 - text_w(&FONT_S, tl) / 2, 3, &FONT_S, tl, C_PANEL);
-    cv_text(26, 3, &FONT_S, view, C_AMBER);
-    cv_text(30 + text_w(&FONT_S, view), 3, &FONT_S, mid, C_CREAM);
+    for (i = 0; i < 2u; i++) {                  /* both tracks: the one shown filled, the other a frame */
+        char tl[2] = {(char)('A' + i), 0};
+        int32_t x = 3 + (int32_t)i * 20;
+        uint16_t c = i ? C_TRK_B : C_AMBER;
+        if (i == t) { cv_rect(x, 3, 17, 17, c); cv_text(x + 9 - text_w(&FONT_S, tl) / 2, 3, &FONT_S, tl, C_PANEL); }
+        else {
+            uint16_t d = i && b_off ? C_KNOB_HI : blend565(C_PANEL, c, 150);
+            cv_rect(x, 3, 17, 1, d); cv_rect(x, 19, 17, 1, d); cv_rect(x, 3, 1, 17, d); cv_rect(x + 16, 3, 1, 17, d);
+            cv_text(x + 9 - text_w(&FONT_S, tl) / 2, 3, &FONT_S, tl, d);
+        }
+    }
+    cv_text(46, 3, &FONT_S, view, C_TRK);
+    cv_text(50 + text_w(&FONT_S, view), 3, &FONT_S, mid, C_CREAM);
     cv_text(236 - text_w(&FONT_S, right), 3, &FONT_S, right, rc);
     cv_rect(0, 23, 240, 1, C_RULE);
     cv_blit(0, 0);
@@ -287,7 +302,7 @@ static void ui_seq_top(uint32_t t, const char *view, const char *mid, const char
 static uint16_t seq_note_c(const step_t *st)    /* a note's colour: its velocity, dim by chance, grey when off */
 {
     if (st->ratch & STEP_OFF) return C_KNOB_HI;
-    return blend565(st->chance < 100u ? C_RULE : C_DIMT, st->chance < 100u ? C_DIMT : C_CREAM, (uint32_t)st->vel * 2u);
+    return blend565(st->chance < 100u ? C_RULE : blend565(C_PANEL, C_TRK, 110), st->chance < 100u ? blend565(C_PANEL, C_TRK, 150) : C_TRK, (uint32_t)st->vel * 2u);
 }
 
 static void ui_seq_roll(uint32_t t, uint32_t w0, int32_t cursor, int32_t playhead)
@@ -296,6 +311,7 @@ static void ui_seq_roll(uint32_t t, uint32_t w0, int32_t cursor, int32_t playhea
     uint32_t len = pat.trk[t].len, i, k;
     int32_t lo = 127, hi = 0;
     cv_begin(240, 112, C_SCOPE_BG);
+    cv_rect(0, 0, 240, 1, C_TRK);               /* (the track's colour round the roll) */
     for (i = 0; i < 16u && w0 + i < len; i++) {   /* the pitch range: the window's notes, at least an octave */
         const step_t *st = seq_step(t, w0 + i);
         for (k = 0; k < SEQ_CHORD && st->note[k]; k++) {
@@ -376,8 +392,8 @@ static void ui_seq_knobs(const knob_view_t *k)
         cv_rect(cx - 22, 42, 44, 3, C_KNOB);
         if (k[i].max > 0) {
             f = 44 * clampi(k[i].v, 0, k[i].max) / k[i].max;
-            if (k[i].bip) { if (f >= 22) cv_rect(cx, 42, f - 22, 3, C_AMBER); else cv_rect(cx - 22 + f, 42, 22 - f, 3, C_AMBER); }
-            else cv_rect(cx - 22, 42, f, 3, C_AMBER);
+            if (k[i].bip) { if (f >= 22) cv_rect(cx, 42, f - 22, 3, C_TRK); else cv_rect(cx - 22 + f, 42, 22 - f, 3, C_TRK); }
+            else cv_rect(cx - 22, 42, f, 3, C_TRK);
         }
     }
     cv_blit(0, 188);
