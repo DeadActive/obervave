@@ -108,8 +108,9 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 Released: **1.3** (2026-10-15, FM-1_953, docs/firmware, tag v1.3: the full-screen sequencer as SLOOP's step page, patterns as
 zp12's loops) and **SMK-37 1.3-beta** (docs/firmware/smk37, tag smk37-v1.3-beta, still untested on a real SMK-37).
 Before: 1.2.1 (FM-1_952; 1.2 replaced: a held function button's knobs
-went to the GLOBAL page's settings). The hub reads the newest package in docs/firmware via the GitHub API from the
-Pi (`~/docker/sloopdx-site/update.sh`); 60 calls an hour without a token, so a sync can hit the limit.
+went to the GLOBAL page's settings). The hub (thefirmwarehub.com, hosted at Hetzner, the
+user 2026-10-15; its catalogue: fm1.designburgapps.com/catalog.json) reads the newest package in docs/firmware via
+the GitHub API when it syncs; 60 calls an hour without a token, so a sync can hit the limit.
 
 Later on 2026-10-13: **the step sequencer** (two tracks, 256 steps, chords, ratchets, chance, step + live record,
 8 patterns), host-tested (timing 1/16 at 120 BPM checked in the WAV, screens filmed), device build passes. **Not
