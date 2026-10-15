@@ -872,9 +872,14 @@ static void seq_view_turn(uint32_t knob, int32_t e)
         }
         return;
     }
-    if (seq_view == SV_TRACK) {                 /* LENGTH (A and B share 256 steps; B 0 = off), DIV, SWING, TRANSPOSE */
+    if (seq_view == SV_TRACK || (!len && knob == 0)) {   /* LENGTH (A and B share 256 steps; B 0 = off; a track off:
+                                                         * KNOB 1 gives it a length on every view), DIV, SWING, TRANSPOSE */
         if (knob == 0) {
-            tk->len = (uint16_t)clampi((int32_t)tk->len + e, t ? 0 : 1, (int32_t)(SEQ_STEPS - pat.trk[t ^ 1u].len));
+            int32_t l = (int32_t)tk->len;
+            if (!l && e > 0) l = 16;            /* (switched on: a bar) */
+            else if (e > 1 || e < -1) l = e > 0 ? (l / 16 + 1) * 16 : (l - 1) / 16 * 16;   /* fast: a page of 16 */
+            else l += e;
+            tk->len = (uint16_t)clampi(l, t ? 0 : 1, (int32_t)(SEQ_STEPS - pat.trk[t ^ 1u].len));
             if (tk->len && seq_cur[t] >= tk->len) seq_cursor_set(t, tk->len - 1u);
         } else if (knob == 1) tk->div = (uint8_t)clampi((int32_t)tk->div + sg, 0, NDIV - 1);
         else if (knob == 2) tk->swing = (uint8_t)clampi((int32_t)tk->swing + e, 50, 75);
@@ -932,13 +937,13 @@ static void seq_view_knob(knob_view_t *k, uint32_t i)
         return;
     }
     if (seq_view == SV_TRACK) {
-        if (i == 0) { if (tk->len) fmt_u(v, tk->len); else scat(v, "OFF"); k->v = tk->len; k->max = 64; }
+        if (i == 0) { if (tk->len) fmt_u(v, tk->len); else scat(v, "OFF"); k->v = tk->len; k->max = SEQ_STEPS; }
         else if (i == 1) { scat(v, DIV_NAME[tk->div % NDIV]); k->v = tk->div; k->max = NDIV - 1; }
         else if (i == 2) { fmt_u(v, tk->swing); scat(v, "%"); k->v = tk->swing - 50; k->max = 25; }
         else { fmt_s(v, tk->transp); k->v = tk->transp + 24; k->max = 48; k->bip = 1; }
         return;
     }
-    if (!len) { if (i == 0) scat(v, "OFF"); return; }
+    if (!len) { if (i == 0) { k->label = "LENGTH"; scat(v, "OFF"); } return; }
     if (i == 0) { fmt_u(v, seq_cur[t] % len + 1u); scat(v, "/"); fmt_u(v + slen(v), len); k->v = (int32_t)(seq_cur[t] % len); k->max = (int32_t)len - 1; return; }
     if (!st->note[0]) { scat(v, "--"); return; }
     if (seq_view == SV_STEPS) {
@@ -1013,7 +1018,7 @@ static void seq_info_line(char *s, uint16_t *c)
         scat(s, "  OF 256");
         return;
     }
-    if (!len) { *c = C_DIMT; scat(s, "TRACK OFF: SEQ 3x, LENGTH"); return; }
+    if (!len) { *c = C_DIMT; scat(s, t ? "B IS OFF: KNOB 1 SWITCHES ON" : "A IS OFF: KNOB 1 SWITCHES ON"); return; }
     {
         const step_t *st = seq_step(t, seq_cur[t] % len);
         fmt_u(s, seq_cur[t] % len + 1u);
@@ -1329,7 +1334,7 @@ static void app_main(void)
         if ((e = fm1_enc_take(ENC_ALGORITHM)) != 0) {   /* ALGORITHM: the track (as sloopDX) */
             uint32_t t = e > 0 ? 1u : 0u;
             if (t != seq_trk) { seq_trk = t; step_held = -1; audition_off(); }
-            say(t ? (pat.trk[1].len ? "TRACK B" : "TRACK B IS OFF: SEQ + " NM_KNOB4) : "TRACK A");
+            say(t ? (pat.trk[1].len ? "TRACK B" : is_seq_page(page) ? "TRACK B OFF: KNOB 1 = ON" : "TRACK B IS OFF: SEQ + " NM_KNOB4) : "TRACK A");
             dirty_page = dirty_steps = dirty_tags = 1;
         }
         if ((e = fm1_enc_take(ENC_SELECT)) != 0) {   /* SELECT: the tempo, always */
