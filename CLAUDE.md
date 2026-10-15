@@ -110,7 +110,9 @@ zp12's loops) and **SMK-37 1.3.1-beta** (docs/firmware/smk37, tag smk37-v1.3.1-b
 Before: 1.2.1 (FM-1_952; 1.2 replaced: a held function button's knobs
 went to the GLOBAL page's settings). The hub (thefirmwarehub.com, hosted at Hetzner, the
 user 2026-10-15; its catalogue: fm1.designburgapps.com/catalog.json) reads the newest package in docs/firmware via
-the GitHub API when it syncs; 60 calls an hour without a token, so a sync can hit the limit.
+the GitHub API when it syncs: cron every 3 h (1, 4, ... 22 h) `/srv/fm1/sync.sh` on `ssh hetzner-fm1-user`, log
+/srv/fm1/fm1live/sync.log; run it by hand after a release. 60 calls an hour without a token, so a sync can hit the limit.
+The card's text is in zp12repo's tools/fm1_sync.py.
 
 Later on 2026-10-13: **the step sequencer** (two tracks, 256 steps, chords, ratchets, chance, step + live record,
 8 patterns), host-tested (timing 1/16 at 120 BPM checked in the WAV, screens filmed), device build passes. **Not
