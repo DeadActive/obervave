@@ -880,6 +880,8 @@ static void seq_view_turn(uint32_t knob, int32_t e)
             else if (e > 1 || e < -1) l = e > 0 ? (l / 16 + 1) * 16 : (l - 1) / 16 * 16;   /* fast: a page of 16 */
             else l += e;
             tk->len = (uint16_t)clampi(l, t ? 0 : 1, (int32_t)(SEQ_STEPS - pat.trk[t ^ 1u].len));
+            if (e > 0 && l > (int32_t)tk->len)  /* (the other track has the rest of the 256) */
+                say(t ? "A HAS THE REST: SHORTEN A" : "B HAS THE REST: SHORTEN B");
             if (tk->len && seq_cur[t] >= tk->len) seq_cursor_set(t, tk->len - 1u);
         } else if (knob == 1) tk->div = (uint8_t)clampi((int32_t)tk->div + sg, 0, NDIV - 1);
         else if (knob == 2) tk->swing = (uint8_t)clampi((int32_t)tk->swing + e, 50, 75);
