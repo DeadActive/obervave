@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""OberVave video 1.2.1 (1920 x 1080, 30 fps, ~115 s): nine OberVaves play one slow dark track (song.py: the real
-firmware's host build, all nine screens filmed at 30 fps, their stems). The whole video is a found VHS tape: a cassette
+"""OberVave video 1.4.1 (1920 x 1080, 30 fps, ~115 s): eight OberVaves play one slow dark track (song.py: the real
+firmware's host build, all eight screens filmed at 30 fps, their stems; kick and hats share one FM-1, two sounds on
+its two tracks). The whole video is a found VHS tape: a cassette
 labelled OBERVAVE · DO NOT ERASE goes into the recorder, the picture has the tape's soft colours, a wobble, the head
 switching at the bottom and a camcorder's date burned in; the VCR's own letters (PLAY, the chapter, STOP, EJECT) sit
 crisp on top. Every section gets its own picture of what you hear, drawn from the real data:
 
-  the cassette goes in, PLAY; the logo strikes through the snow; NINE FM-1s / ONE FIRMWARE / ZERO SAMPLES punched in over a macro of the screen
+  the cassette goes in, PLAY; the logo strikes through the snow; EIGHT FM-1s / ONE FIRMWARE / ZERO SAMPLES punched in over a macro of the screen
   ARP       the ping-pong delay made visible: echoes of the screen as it was a dotted eighth ago, left, right, left
   BASS      its waveform across the whole frame
   PAD       the chorus as double vision; the notes of the arp and the pad falling onto the keys
@@ -14,11 +15,12 @@ crisp on top. Every section gets its own picture of what you hear, drawn from th
   RESO      the bass's waveform wrapped round a circle: the resonance grows spikes
   DOWN      a tunnel of screens, turning with the pitch bend
   KICK      the drums come in after the first minute: its stem as a neon oscilloscope, a filter ringing like a sine
-  SEQUENCER a VHS rewind to how the drums were set (SEQ held, a key per step), then the step rows huge, playing
+  SEQUENCER a VHS rewind to how the drums were set (SEQ held, a key per step; ALGORITHM: track B), then the TRACKS
+            view huge: kick on A (blue), hats on B (orange), one FM-1, two sounds
   UPSIDE    the tape pauses half a bar before the drop; then the second arp's notes rising off the keys
   MORPH     a notch cut through the screen, widening with the filter's morph
   STRINGS   the stereo field as a Lissajous figure (the voices panned across)
-  ALL NINE  the wall of nine, each lit by its own stem; then they fall away, the lead last
+  ALL EIGHT the wall of eight, each lit by its own stem; then they fall away, the lead last
   the end card: the logo, thefirmwarehub.com, like & subscribe
 
   the end: the tape stops (blue screen), the end card rolls in, the cassette beside it, EJECT
@@ -33,9 +35,9 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageChops
 
 HERE = Path(__file__).resolve().parent
 A = HERE
-OUT = HERE / "obervave-1.2.1.mp4"
+OUT = HERE / "obervave-1.4.1.mp4"
 W, H, FPS, SR = 1920, 1080, 30, 44100
-BPM, T0 = 94, 9.0                                      # the music starts at T0 in the films (song.py): the video starts there
+BPM, T0 = 94, 10.0                                     # the music starts at T0 in the films (song.py): the video starts there
 BAR = 4 * 60 / BPM
 BEAT = BAR / 4
 F0 = int(T0 * FPS)
@@ -53,9 +55,11 @@ F_VHS = lambda s: ImageFont.truetype("/run/host/fonts/dejavu-sans-mono-fonts/Dej
 F_OSD = lambda s: ImageFont.truetype(str(A / "fonts" / "VT323-Regular.ttf"), int(s))              # the VCR's letters (OFL)
 F_MARK = lambda s: ImageFont.truetype(str(A / "fonts" / "PermanentMarker-Regular.ttf"), int(s))   # the label, by hand (Apache-2.0)
 
-PARTS = ["arp", "bass", "pad", "lead", "arp2", "strings", "kick", "clap", "hat"]
+PARTS = ["arp", "bass", "pad", "lead", "arp2", "strings", "drums", "clap"]   # the eight filmed FM-1s
+LIGHT = PARTS + ["kick", "hat"]                      # + the drums' two tracks alone (song.py: not filmed, not mixed): their light
 COL = {"arp": (255, 52, 40), "arp2": (255, 130, 60), "bass": (60, 130, 235), "pad": (70, 140, 255), "lead": (255, 70, 140),
-       "strings": (170, 140, 255), "kick": (255, 44, 32), "clap": (230, 235, 255), "hat": (150, 200, 255)}
+       "strings": (170, 140, 255), "drums": (255, 44, 32), "kick": (255, 44, 32), "clap": (230, 235, 255), "hat": (150, 200, 255)}
+TRK_A, TRK_B = (110, 190, 255), (255, 150, 40)        # the firmware's track colours
 
 # ---------------------------------------------------------------- the data: logs, stems, the bend
 LOG = {p: [tuple(int(x) for x in l.split()) for l in open(A / "f" / f"{p}-log.txt")] for p in PARTS}   # ms, keys, key LEDs, btn LEDs, enc x7
@@ -67,7 +71,7 @@ def stem_map(name):                                   # int16 stereo, mapped (th
     with wave.open(str(A / "stems" / f"{name}.wav")) as w:
         n = w.getnframes()
     return np.memmap(A / "stems" / f"{name}.wav", np.int16, "r", off, (n, 2))
-STEM = {p: stem_map(p) for p in PARTS}
+STEM = {p: stem_map(p) for p in LIGHT}
 
 def stem_env(p):                                      # loudness per film frame, 0..1
     m = np.abs(np.asarray(STEM[p], dtype=np.float32)).max(1) / 32768
@@ -75,7 +79,7 @@ def stem_env(p):                                      # loudness per film frame,
     e = np.array([m[i * n:(i + 1) * n].max() if i * n < len(m) else 0 for i in range(NF)])
     return e / max(e.max(), 1e-6), float(m.max())
 ENV, PEAK = {}, {}
-for _p in PARTS:
+for _p in LIGHT:
     ENV[_p], PEAK[_p] = stem_env(_p)
 
 BEND = []                                             # (film ms, -1..1) from the lead's script
@@ -189,7 +193,7 @@ sys.path.insert(0, str(HERE.parent / "tools"))
 _argv, sys.argv = sys.argv, sys.argv[:1]          # (make_logo reads its own arguments on import)
 import make_logo
 sys.argv = _argv
-WORDS = ["KICK", "ARP", "BASS", "SEQUENCER", "PAD", "LEAD", "RESO", "DOWN", "REVERB", "UPSIDE", "MORPH", "STRINGS", "ALL NINE"]
+WORDS = ["KICK", "ARP", "BASS", "SEQUENCER", "PAD", "LEAD", "RESO", "DOWN", "REVERB", "UPSIDE", "MORPH", "STRINGS", "ALL EIGHT"]
 NEON = {}
 for _wd in WORDS + ["OBERVAVE"]:
     _png = A / "f" / f"neon-{_wd.replace(' ', '_')}.png"
@@ -406,14 +410,14 @@ def osd(im, sym, label, right=None):
 
 def camdate(im, t):                                  # the camcorder's date, burned into the picture (the tape smears it too)
     m = 47 + int(t // 60)
-    osd_text(im, (W - 80, H - 46), f"PM 11:{m:02d}  OCT.13 1983", 50, "rs", (255, 238, 205))
+    osd_text(im, (W - 80, H - 46), f"PM 11:{m:02d}  OCT.16 1983", 50, "rs", (255, 238, 205))
 
 # ---------------------------------------------------------------- the scenes (t: seconds into the scene, n: its frames, fi: the films' frame)
 LOGO_XY = ((W - LOGO["full"].width) // 2, (H - LOGO["full"].height) // 2 - 20)
 STRIKE = {10: (0.12, 0), 11: (0.0, 0), 17: (1.0, 0.9), 18: (0.35, 0.2), 19: (0.0, 0), 26: (1.0, 1.0), 27: (1.0, 0.4), 28: (0.15, 0),
           29: (0.0, 0), 34: (0.6, 0.3), 35: (0.2, 0), 36: (0.75, 0), 37: (0.5, 0), 38: (0.85, 0), 39: (0.6, 0), 40: (0.95, 0.5),
           41: (0.8, 0), 42: (1.0, 0), 43: (0.9, 0), 44: (1.0, 0)}
-WORDS_OPEN = [(2.2, "NINE FM-1s."), (2.6, "ONE FIRMWARE."), (3.0, "ZERO SAMPLES."), (3.4, "LIGHTS OFF.")]
+WORDS_OPEN = [(2.2, "EIGHT FM-1s."), (2.6, "ONE FIRMWARE."), (3.0, "ZERO SAMPLES."), (3.4, "LIGHTS OFF.")]
 IN, LOGO_OUT = 40, 160                                # the cassette's frames; the logo leaves into the screen there
 TAPE = cassette(1100, "OBERVAVE", "DO NOT ERASE!")
 
@@ -496,7 +500,7 @@ def s_kick(t, n, fi, b):
         pts = [(W * j / 999, 560 - 330 * float(w[i])) for j, i in enumerate(idx)]
         neon_lines(im, [pts], tuple(int(c * (0.35 + 0.65 * k)) for c in (255, 60, 44)), 5, 1.0 + 1.2 * k)
         text(im, (W - 90, 760), "one hit, 120 ms: the pitch falls as the wave widens", F_REG(26), DIM, 1.0, "ra")
-    dv = device("kick", fi, 1.5, kk, COL["kick"])
+    dv = device("drums", fi, 1.5, kk, COL["kick"])
     shadow_paste(im, dv, (W - dv.width - 90, 90))
     title(im, "KICK", "is a filter at full resonance, ringing like a sine.\nIts envelope drops the pitch. No drum machine.", 110, 820, n)
     return im
@@ -530,7 +534,7 @@ def s_bass(t, n, fi, b):
     title(im, "BASS", "A saw and a pulse an octave below it, drive, glide.\nRoot, octave, root, octave. The filter stays shut.", 110, 160, n, kicker="program 07 · FAT BASS")
     return im
 
-PROG0, PROG1 = int(3.65 * FPS), int(7.95 * FPS)       # the films' frames where the kick and the hats are set by hand
+PROG0, PROG1 = int(3.65 * FPS), int(8.75 * FPS)       # the drums' film: the kick set by hand, ALGORITHM, then the hats
 def vhs(im, n, amount):                               # tracking noise: bands of rows slipping, a little snow
     a = np.asarray(im).copy()
     rnd = np.random.RandomState(n * 7 + 1)
@@ -545,39 +549,42 @@ OSD = {}                                              # what a scene asks of the
 def s_seq(t, n, fi, b):
     im = BGIMG.copy()
     REW, PLAY = 0.7, 2.2
-    if t < REW + PLAY:                                # the tape: rewind to the setting of the steps, then play it at x2
+    if t < REW + PLAY:                                # the tape: rewind to the setting of the steps, then play it fast
+        spd = (PROG1 - PROG0) / (PLAY * FPS)
         if t < REW:
             src = int(fi + (PROG0 - fi) * ease(t / REW))
             amount = 1.0
         else:
-            src = int(PROG0 + (t - REW) * FPS * 2)
+            src = int(PROG0 + (t - REW) * FPS * spd)
             amount = 0.25
-        for i, p in enumerate(("kick", "hat")):
-            dv = device(p, src, 2.0)
-            x = 150 + i * 860
-            shadow_paste(im, dv, (x, 170))
-            keys = LOG[p][max(0, min(src, NF - 1))][1]
-            keyboard(im, x, 170 + dv.height + 30, dv.width, keys, COL[p])
-            text(im, (x + dv.width // 2, 140), p.upper(), F_SEMI(28), BLUE, 1.0, "mm")
+        dv = device("drums", src, 2.4)
+        x = (W - dv.width) // 2 - 260
+        shadow_paste(im, dv, (x, 120))
+        keys = LOG["drums"][max(0, min(src, NF - 1))][1]
+        keyboard(im, x, 120 + dv.height + 26, dv.width, keys, COL["drums"])
+        on_b = src * 1000 / FPS > 5303                # (song.py: ALGORITHM to track B once the kick is set)
+        text(im, (x + dv.width + 70, 300), "KICK" if not on_b else "HATS", F_BLACK(72), TRK_B if on_b else TRK_A, 1.0)
+        text(im, (x + dv.width + 70, 390), "track A" if not on_b else "track B, its own sound", F_SEMI(32), CREAM, 1.0)
         im = vhs(im, n, amount)
-        OSD.update(sym="rew" if t < REW else "play", label="REW" if t < REW else "PLAY x2", stress=amount)
+        OSD.update(sym="rew" if t < REW else "play", label="REW" if t < REW else f"PLAY x{spd:.0f}", stress=amount)
         if t >= REW:
-            text(im, (W // 2, H - 120), "SEQ held · a key per step · its knobs while it is held", F_OSD(46), (255, 255, 255), 1.0, "mm")
+            text(im, (W // 2 - 140, H - 150), "SEQ held · a key per step · ALGORITHM: track B", F_OSD(46), (255, 255, 255), 1.0, "mm")
         return im
-    # live: the step rows, huge (the screen's own pixels), the playhead running
+    # live: the TRACKS view, huge (the screen's own pixels): kick on A, hats on B, the playheads running
     n2 = n - int((REW + PLAY) * FPS)
-    for p, y, lab in (("hat", 250, "HATS · SEQ A · 8 STEPS · 1/8"), ("kick", 660, "KICK · SEQ A · 4 STEPS · 1/4")):
-        s = screen_raw(p, fi).crop((0, 163, 124 if p == "hat" else 64, 196))
-        s = s.resize((s.width * 11, s.height * 11), Image.NEAREST)
-        lv = float(ENV[p][fi])
-        lay = Image.new("RGB", (W, H), (0, 0, 0))
-        lay.paste(s, (110, y))
-        im.paste(ImageChops.add(im, bloom(lay, 0.6 + 0.8 * lv, 5)))
-        text(im, (114, y - 44), lab, F_SEMI(28), COL[p], 1.0)
+    s = screen_raw("drums", fi).crop((0, 24, 240, 168))
+    s = scanlines(s.resize((s.width * 4, s.height * 4), Image.NEAREST), 4)
+    lay = Image.new("RGB", (W, H), (0, 0, 0))
+    lay.paste(s, (110, 330))
+    lv = max(float(ENV["kick"][fi]), 0.6 * float(ENV["hat"][fi]))
+    im.paste(ImageChops.add(im, bloom(lay, 0.35 + 0.5 * lv, 5)))
+    for y, lab, c, p in ((330 + 8, "KICK", TRK_A, "kick"), (330 + 296, "HATS", TRK_B, "hat")):
+        k = float(ENV[p][fi])
+        text(im, (110 + 960 + 40, y + 70), lab, F_BLACK(56), tuple(int(v * (0.55 + 0.45 * k)) for v in c), 1.0)
     title(im, "SEQUENCER", None, 110, 100, n2, cap=90)
-    text(im, (870, 660 + 140), "New in 1.2: two tracks, 256 steps,", F_REG(34), CREAM, ease((n2 - 6) / 10))
-    text(im, (870, 660 + 186), "chords, long notes, live recording,", F_REG(34), CREAM, ease((n2 - 10) / 10))
-    text(im, (870, 660 + 232), "a click and a count-in. Played as sloopDX.", F_REG(34), CREAM, ease((n2 - 14) / 10))
+    for i, ln in enumerate(("New in 1.4: track B plays a sound", "of its own. Kick on A, hats on B:",
+                            "one FM-1, two sounds, two arps,", "the tracks one under the other.")):
+        text(im, (1290, 330 + 140 + 46 * i), ln, F_REG(34), CREAM, ease((n2 - 6 - 4 * i) / 10))
     return im
 
 def s_pad(t, n, fi, b):
@@ -736,17 +743,17 @@ def s_strings(t, n, fi, b):
     title(im, "STRINGS", "PWM, every voice its own LFO phase,\npanned across the field. That figure\nis their stereo width, live.", 110, 650, n, cap=90, kicker="program 05 · PWM STRINGS")
     return im
 
-GRID = ["arp", "bass", "pad", "lead", "arp2", "strings", "kick", "clap", "hat"]
-FALL = {"kick": 38.0, "clap": 38.0, "hat": 38.1, "arp2": 38.3, "bass": 38.5, "arp": 38.7, "strings": 39.4, "pad": 39.6}
+GRID = ["arp", "bass", "pad", "lead", "arp2", "strings", "drums", "clap"]   # 4 x 2
+FALL = {"drums": 38.0, "clap": 38.05, "arp2": 38.3, "bass": 38.5, "arp": 38.7, "strings": 39.4, "pad": 39.6}
 def s_all(t, n, fi, b):
     im = BGIMG.copy()
     z = 1.0 + 0.06 * min(1.0, (b - 34) / 4)
-    tile = int(270 * z)
-    gx0, gy0 = W // 2 - int(1.5 * tile + 30 * z), H // 2 - int(1.5 * tile + 30 * z) - 30
+    tile = int(370 * z)
+    gx0, gy0 = W // 2 - int(2 * tile + 45 * z), H // 2 - int(tile + 15 * z) - 30
     dvs = []
     for i, p in enumerate(GRID):
         lv = float(ENV[p][fi])
-        x, y = gx0 + (i % 3) * int(tile + 30 * z), gy0 + (i // 3) * int(tile + 30 * z)
+        x, y = gx0 + (i % 4) * int(tile + 30 * z), gy0 + (i // 4) * int(tile + 30 * z)
         if b >= 38:                                   # the last fall: one by one they drop away
             tf = FALL.get(p)
             if tf is not None and b > tf:
@@ -770,17 +777,17 @@ def s_all(t, n, fi, b):
                 shadow_paste(im, dv, (x, y))
     if b < 36:
         k = flicker(n)
-        img, ox = neon("ALL NINE", 120)
+        img, ox = neon("ALL EIGHT", 120)
         lay = Image.new("RGB", (W, H), (0, 0, 0))
         lay.paste(img, ((W - img.width) // 2, H // 2 - img.height // 2), img)
         a = k * (1 - ease((b - 35.2) / 0.8))
         im = Image.blend(im, ImageChops.lighter(Image.blend(im, Image.new("RGB", (W, H), BG), 0.55), lay), max(0.0, a))
     if 36 <= b < 38:
-        text(im, (W // 2, H - 50), "9 FM-1s  ·  1 FIRMWARE  ·  0 SAMPLES", F_SEMI(32), CREAM, ease((b - 36) * 2), "mm")
+        text(im, (W // 2, H - 50), "8 FM-1s  ·  1 FIRMWARE  ·  0 SAMPLES", F_SEMI(32), CREAM, ease((b - 36) * 2), "mm")
     return im
 
 STOP_T, ROLL_T = 0.8, 1.0                              # the end: the blue screen, then the card rolls in
-END_TAPE = cassette(820, "OBERVAVE 1.2.1", "thefirmwarehub.com", (40, 90, 200))
+END_TAPE = cassette(820, "OBERVAVE 1.4.1", "thefirmwarehub.com", (40, 90, 200))
 def s_end(t, n, fi, b):
     if t < STOP_T:                                    # the tape stops: the recorder's blue, STOP
         OSD.update(sym="stop", label="STOP", clean=True)
@@ -811,11 +818,11 @@ def s_end(t, n, fi, b):
         dl.text((x + 560, 700), "@sonzven", font=F_SEMI(40), fill=(255, 110, 80, int(255 * a2)), anchor="lm")
         im.paste(lay, (0, 0), lay)
     y = 800
-    for ln in ("OberVave 1.2.1: free firmware, GPL-3.0. Built on Dinghy,",
+    for ln in ("OberVave 1.4.1: free firmware, GPL-3.0. Built on Dinghy,",
                "SLOOP 2.3 (isod89) and Felucca (Hügelton Instruments).",
                "Inspired by the classic 8-voice poly synths of 1979-84",
                "(trademarks of their owners, no affiliation).",
-               "Every sound: OberVave on the FM-1, nine of them. No samples were harmed."):
+               "Every sound: OberVave on the FM-1, eight of them. No samples were harmed."):
         text(im, (x, y), ln, F_REG(22), DIM, ease((n2 - 44) / 12)); y += 32
     im = bloom(im, 0.25)
     if t2 < ROLL_T:                                   # the picture rolls until the recorder finds its sync
@@ -838,7 +845,7 @@ SCENES = [(0, 4, s_open), (4, 8, s_arp), (8, 12, s_bass), (12, 16, s_pad), (16, 
 END_BAR = b0_end = 40
 PAUSE = 27.5
 NAMES = {"kick": "KICK", "arp": "ARP", "bass": "BASS", "seq": "SEQUENCER", "pad": "PAD", "lead": "LEAD", "reso": "RESO",
-         "down": "DOWN", "reverb": "REVERB", "upside": "UPSIDE", "morph": "MORPH", "strings": "STRINGS", "all": "ALL NINE"}
+         "down": "DOWN", "reverb": "REVERB", "upside": "UPSIDE", "morph": "MORPH", "strings": "STRINGS", "all": "ALL EIGHT"}
 CHAPTER = {int(round(b0 * BAR * FPS)): f"CH {i + 1:02d}  {NAMES[fn.__name__[2:]]}" for i, (b0, _, fn) in enumerate(SCENES[1:-1])}
 total_frames = min(NF - F0, int(((END_BAR + 4) * BAR + 3.0) * FPS))
 CUTS = sorted(CHAPTER) + [LOGO_OUT]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The OberVave video's music: nine OberVaves (the real firmware's host build, firmware/src/obervave.c), each with a
+"""The OberVave video's music: eight OberVaves (the real firmware's host build, firmware/src/obervave.c), each with a
 script of notes, CCs, button presses and knob turns. D minor, 94 BPM, 40 bars: slow dark disco, a four-note arpeggio
 climbing all the way through, a rolling octave bass, four on the floor, a woozy lead, everything through delay and plate.
 Writes scripts/<part>.txt, runs the host build (tests/run_host.sh builds it) filmed at 30 fps (f/<part>/NNNNN.png +
@@ -14,7 +14,7 @@ from PIL import Image
 HERE = Path(__file__).resolve().parent
 OBV = HERE.parent
 HOST = OBV / "build" / "host" / "obervave"
-BPM, T0 = 94, 9000                                    # splash 2.4 s, the tempo dialled in, the drums' steps set; music at T0
+BPM, T0 = 94, 10000                                   # splash 2.4 s, the tempo dialled in, the drums' steps set; music at T0
 BEAT = 60000 / BPM
 BARS = 44                                             # 40 and the last chord's tail
 END = T0 + int(BARS * 4 * BEAT) + 15000                 # the plates ring out under the end card (4 bars + 3 s in make_video)
@@ -50,18 +50,18 @@ def ccval(name, v):                                   # the CC that sets paramet
     return d
 
 class Part:
-    def __init__(self, name, film):
-        self.name, self.film, self.ev = name, film, []
+    def __init__(self, name, film, mix=True):
+        self.name, self.film, self.mix, self.ev = name, film, mix, []
     def at(self, bar, beat=0.0): return T0 + int((bar * 4 + beat) * BEAT)
     def note(self, bar, beat, n, vel, dur_beats):
         t = self.at(bar, beat)
         self.ev.append((t, f"midi 0x90 {n} {vel}"))
         self.ev.append((t + int(dur_beats * BEAT) - 2, f"midi 0x80 {n} 0"))
     def chord(self, bar, beat, notes, vel, dur): [self.note(bar, beat, n, vel, dur) for n in notes]
-    def cc(self, t, name, v): self.ev.append((t, f"midi 0xB0 {CC[name]} {ccval(name, v)}"))
-    def set(self, t, **kv):
-        for k, v in kv.items(): self.cc(t, k, v); t += 1
-    def pc(self, t, prog): self.ev.append((t, f"midi 0xC0 {prog} 0"))
+    def cc(self, t, name, v, ch=0): self.ev.append((t, f"midi {0xB0 + ch:#x} {CC[name]} {ccval(name, v)}"))
+    def set(self, t, ch=0, **kv):
+        for k, v in kv.items(): self.cc(t, k, v, ch); t += 1
+    def pc(self, t, prog, ch=0): self.ev.append((t, f"midi {0xC0 + ch:#x} {prog} 0"))
     def btn(self, t, b): self.ev.append((t, f"btn {BTN[b] if isinstance(b, str) else b}"))
     def btns(self, t, *names):                        # presses 50 ms apart
         for i, b in enumerate(names): self.btn(t + 50 * i, b)
@@ -126,7 +126,7 @@ def chord_of(bar): return PROGRESSION[bar % 4]
 def root_of(bar): return ROOT[bar % 4]
 
 parts = {}
-def P(name, film=True): parts[name] = Part(name, film); return parts[name]
+def P(name, film=True, mix=True): parts[name] = Part(name, film, mix); return parts[name]
 
 # ARP: DARK ARP, the backbone all 40 bars: the chord held a bar, climbed in 16ths. The filter opens over the first
 # half, all the way in the breakdown, drops shut at the drop (bar 28) and opens once more
@@ -214,34 +214,50 @@ strings.btns(T0 - 200, "LFO")                         # the LFO page (the PWM)
 
 # DRUMS: three OberVaves from INIT. Kick: the resonant 12 dB filter rings like a sine, the envelope drops its pitch.
 # Clap: noise through the band-pass, four quick hits, a long plate. Hats: noise through the high-pass, open on the offbeat.
-kick = P("kick")
-kick.setup(PROG["INIT"], oct=-2, MODE=3, O1_WAVE=1, O1_LVL=55, O2_WAVE=0, NOISE=0, FTYPE=0, CUTOFF=22, RESO=125, FENV_AMT=64 + 50,
-           FA=0, FD=66, FS=0, AA=0, AD=90, AS=0, AR=40, KEYTRK=0, VEL_FLT=0, VEL_AMP=30, DRIVE=45, VINTAGE=0, SPREAD=0, VOLUME=127, GLIDE=0)
+KICK = dict(MODE=3, O1_WAVE=1, O1_LVL=55, O2_WAVE=0, NOISE=0, FTYPE=0, CUTOFF=22, RESO=125, FENV_AMT=64 + 50,
+            FA=0, FD=66, FS=0, AA=0, AD=90, AS=0, AR=40, KEYTRK=0, VEL_FLT=0, VEL_AMP=30, DRIVE=45, VINTAGE=0, SPREAD=0, VOLUME=127, GLIDE=0)
+HAT = dict(MODE=3, O1_WAVE=0, O2_WAVE=0, NOISE=127, FTYPE=1, CUTOFF=116, RESO=20, FENV_AMT=64,
+           FA=0, AA=0, AD=50, AS=70, AR=60, KEYTRK=0, VEL_AMP=90, VINTAGE=0, SPREAD=0,
+           VOLUME=60)                         # (95 on its own FM-1 at a stem gain of 1.1; here under the kick's 2.8: 95 x sqrt(1.1 / 2.8))
+DRUMS_IN = 24
+def drums_part(name, film=True, mix=True, mute=None):
+    """kick and hats on ONE OberVave (1.4: track B has a sound of its own): the kick is sound A on track A, the hats
+    are track B's own sound, set from MIDI channel 2. Both programmed by hand on the step sequencer before the music
+    (SEQ held, the keys as steps; ALGORITHM picks track B): kick 4 quarters (1 3 HARD, 2 4 NORM, half-beat gates),
+    hats 8 eighths (closed SOFT and short, open NORM and long). mute: 0 / 1 mutes track A / B (GLO + key 1 / 2): the
+    video's light for the kick and for the hats alone, not filmed, not mixed"""
+    d = P(name, film, mix)
+    d.setup(PROG["INIT"], oct=-2, **KICK)
+    d.turn(3260, 3260, "K3", 1)                       # GLOBAL, MIDI CH: OMNI -> 1, so channel 2 plays track B's sound
+    t = d.program_steps(3600, 36, -3, -12, [(0, 1, -16), (1, 0, -16), (2, 1, -16), (3, 0, -16)])
+    d.enc(t, "CUTOFF", 1)                             # ALGORITHM: track B
+    t = d.program_steps(t + 60, 70, -2, 8, [(k, -1 if k % 2 == 0 else 0, -35 if k % 2 == 0 else 6) for k in range(8)])
+    d.enc(t, "CUTOFF", -1)                            # back to A: the kick's sound comes on channel 1 next
+    assert t < T0 - 800, t
+    d.pc(T0 - 600, PROG["INIT"], ch=1)                # track B's own sound: INIT, then the hats' settings
+    d.set(T0 - 590, ch=1, **HAT)
+    if mute is not None: d.glo_key(T0 - 450, mute)
+    d.btn(T0 - 200, "SEQ")                            # TRACKS: kick on A (blue), hats on B (orange)
+    d.btn(d.at(DRUMS_IN) - 2, "PLAY")
+    d.btn(d.at(38) - 10, "PLAY")
+    return d
+kick = drums_part("drums")
+drums_part("kick", film=False, mix=False, mute=1)
+drums_part("hat", film=False, mix=False, mute=0)
 clap = P("clap")
 clap.setup(PROG["INIT"], MODE=3, O1_WAVE=0, O2_WAVE=0, NOISE=127, FTYPE=2, CUTOFF=74, RESO=45, FENV_AMT=64 + 10,
            FA=0, FD=50, FS=0, AA=0, AD=62, AS=0, AR=50, KEYTRK=0, VEL_FLT=30, VEL_AMP=50, DRIVE=20, VINTAGE=0, SPREAD=0, VOLUME=120,
            REV_SIZE=112, REV_DAMP=65, REV_PRE=15, REV_MIX=70)
-hat = P("hat")
-hat.setup(PROG["INIT"], oct=1, MODE=3, O1_WAVE=0, O2_WAVE=0, NOISE=127, FTYPE=1, CUTOFF=116, RESO=20, FENV_AMT=64,
-          FA=0, AA=0, AD=50, AS=70, AR=60, KEYTRK=0, VEL_AMP=90, VINTAGE=0, SPREAD=0, VOLUME=95)
-# kick and hats are OberVave's own step sequencer, programmed by hand before the music (SEQ held, the keys as steps):
-# kick 4 quarters (1 3 HARD, 2 4 NORM, half-beat gates), hats 8 eighths (closed SOFT and short, open NORM and long).
-# No drums for the first minute (the synths alone): PLAY starts both on bar 24, a clap roll leads in; PLAY stops them at bar 38.
-kick.program_steps(3600, 36, -3, -12, [(0, 1, -16), (1, 0, -16), (2, 1, -16), (3, 0, -16)])
-hat.program_steps(3600, 70, -2, -8, [(k, -1 if k % 2 == 0 else 0, -35 if k % 2 == 0 else 6) for k in range(8)])
-DRUMS_IN = 24
-for d in (kick, hat):
-    d.btn(T0 - 200, "SEQ")                            # the sequencer's page on their screens
-    d.btn(d.at(DRUMS_IN) - 2, "PLAY")
-    d.btn(d.at(38) - 10, "PLAY")
+# no drums for the first minute (the synths alone): PLAY starts both tracks on bar 24, a clap roll leads in; PLAY stops them at bar 38
 for bar in range(DRUMS_IN, 38):
     for beat in (1, 3):
         for k in range(3): clap.note(bar, beat + k * 0.04, 60, 100 + k * 8, .25)   # the flam of a clap
 for i in range(8): clap.note(27, 2 + i * .25, 60, 70 + i * 7, .15)   # a clap roll into the drop
 for i in range(4): clap.note(DRUMS_IN - 1, 2 + i * .5, 60, 85 + i * 10, .2)   # and one that brings the drums in
-kick.note(40, 0, 36, 120, .5); clap.note(40, 0, 60, 110, .25)
+kick.note(40, 0, 36, 120, .5); clap.note(40, 0, 60, 110, .25)   # (the last kick from MIDI: sound A)
+parts["kick"].note(40, 0, 36, 120, .5)                # (and in the kick's light)
 
-GAIN = {"arp": 3.6, "bass": 1.5, "pad": 1.1, "lead": 1.4, "arp2": 2.4, "strings": 1.0, "kick": 2.8, "clap": 4.2, "hat": 1.1}
+GAIN = {"arp": 3.6, "bass": 1.5, "pad": 1.1, "lead": 1.4, "arp2": 2.4, "strings": 1.0, "drums": 2.8, "clap": 4.2}
 
 def run(part):
     script = part.write()
@@ -265,7 +281,7 @@ def main():
     from concurrent.futures import ThreadPoolExecutor
     if "--mix-only" in sys.argv:                      # the stems as they are, only the gains and the sum
         stems = {}
-        for name in parts:
+        for name in [p for p in parts if parts[p].mix]:
             with wave.open(str(HERE / "stems" / f"{name}.wav")) as w:
                 stems[name] = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).reshape(-1, 2).astype(np.float32) / 32768
     else:                                             # --parts a,b: film only those again, the other stems as they are
@@ -276,7 +292,7 @@ def main():
             if name not in stems:
                 with wave.open(str(HERE / "stems" / f"{name}.wav")) as w:
                     stems[name] = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).reshape(-1, 2).astype(np.float32) / 32768
-        stems = {p: stems[p] for p in parts}
+        stems = {p: stems[p] for p in parts if parts[p].mix}
     n = max(len(a) for a in stems.values())
     mix = np.zeros((n, 2), np.float32)
     for name, a in stems.items():
