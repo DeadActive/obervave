@@ -79,6 +79,12 @@ cursor step's notes and up to 64 steps as small cells, and the four knobs. Track
 shown on top, the one you edit filled). SEQ tapped again steps through its views,
 **HOME** leaves.
 
+**Two tracks, one sound.** Both tracks play the current program on the same eight voices (OberVave is one synth):
+two note lanes, say a bass line on A and an arpeggio on B, each with its own length, DIV, SWING and TRANSPOSE (16
+steps against 12 makes a polymeter). **Track B starts switched off** (length 0). To start it: SEQ tapped,
+**ALGORITHM** (the badge on top turns to B, orange), turn **KNOB 1**: B gets 16 steps; then play notes into it or
+REC on top of A. GLO held + key 1 / 2 mutes A / B, + key 5 / 6 solos it.
+
 | View | KNOB 1 | KNOB 2 | KNOB 3 | KNOB 4 |
 | --- | --- | --- | --- | --- |
 | **STEPS** | the step cursor | NOTE (the chord moves) | GATE (to TIE) | VELOCITY |
