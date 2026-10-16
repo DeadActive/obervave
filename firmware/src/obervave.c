@@ -149,7 +149,7 @@ static void load_program(uint32_t n)
  * and its own sound, the panel is on that sound: the keys play it, the pages edit it, PRESETS picks it, SAVE saves
  * it. The arpeggiator and the effects stay sound A's. */
 static uint32_t ed_b(void) { return seq_trk && pat.trk[1].B_PROG; }
-static int is_a_only(uint32_t p) { return (p >= P_ARP_MODE && p <= P_ARP_GATE) || (p >= P_CHO_RATE && p <= P_REV_MIX); }
+static int is_a_only(uint32_t p) { return p >= P_CHO_RATE && p <= P_REV_MIX; }   /* (the effects: one chain; each sound has its arp) */
 static patch_t *ed_patch(uint32_t p) { return ed_b() && !is_a_only(p) ? &live_b : &live; }
 static uint32_t ed_prog(void) { return ed_b() ? pat.trk[1].B_PROG - 1u : prog; }
 static uint32_t ed_edited(void) { return ed_b() ? edited_b : edited; }
@@ -184,7 +184,7 @@ static void play_note(uint32_t on, uint32_t note, uint32_t vel)
     if (on) note_part[note] = (uint8_t)ed_b();
     note_event_p(note_part[note], on, note, vel);
 }
-static int rec_keys(void) { return ed_b() || !live.v[P_ARP_MODE]; }   /* (feeding A's arp: the arp's notes are recorded) */
+static int rec_keys(void) { return !ed_patch(P_ARP_MODE)->v[P_ARP_MODE]; }   /* (feeding an arp: its notes are recorded) */
 
 static void load_pattern(uint32_t n)            /* the saved one, else the factory's */
 {
@@ -434,7 +434,7 @@ static void draw_header(void)
         static const char *const MODE_S[4] = {"POLY", "DUAL", "UNI", "MONO"};
         static const char *const FT_S[NFTYPE] = {"LP12", "HP12", "BP12", "NOTCH", "LP24", "SEM"};
         const uint8_t *pv = ed_patch(0)->v;     /* (the mode and filter of the sound the panel is on) */
-        uint32_t arp = live.v[P_ARP_MODE] != 0, fx = live.v[P_CHO_MIX] || live.v[P_DLY_MIX] || live.v[P_REV_MIX], trk = seq_trk;
+        uint32_t arp = pv[P_ARP_MODE] != 0, fx = live.v[P_CHO_MIX] || live.v[P_DLY_MIX] || live.v[P_REV_MIX], trk = seq_trk;
         uint32_t n = slen(MODE_S[pv[P_MODE] & 3u]) + 1u + slen(FT_S[pv[P_FTYPE] % NFTYPE])
                    + (hold ? 5u : 0u) + (ctl_seq_run ? 4u : 0u) + (rec ? 4u : 0u);
         if (trk && n + 2u <= 23u) n += 2u; else trk = 0;
@@ -1342,9 +1342,9 @@ static void app_main(void)
         if (dirty_steps) dirty_page = 1;
 #endif
         while (arp_qr != arp_qw) {              /* REC with the arp on: what it plays is recorded */
-            uint8_t on = arp_q[arp_qr % AQ][0], n = arp_q[arp_qr % AQ][1];
+            uint8_t on = arp_q[arp_qr % AQ][0], n = arp_q[arp_qr % AQ][1], ap = arp_q[arp_qr % AQ][2];
             arp_qr++;
-            if (live.v[P_ARP_MODE] && !ed_b()) { rec_from_arp = 1; rec_note(on, n, 100); rec_from_arp = 0; dirty_steps = 1; }
+            if (ap == ed_b() && ed_patch(P_ARP_MODE)->v[P_ARP_MODE]) { rec_from_arp = 1; rec_note(on, n, 100); rec_from_arp = 0; dirty_steps = 1; }
         }
         if (ctl_seq_run && pat.trk[seq_trk].len && ui_seq_pos[seq_trk] != erase_pos) {   /* erasing as the playhead passes */
             uint32_t n;
@@ -1681,7 +1681,7 @@ static void app_main(void)
             uint32_t rec_on = rec == REC_ON || (rec == REC_READY && (fm1_ms / 250u) & 1u);
             uint32_t pg = steps_on();
             uint32_t on = pg ? seq_pg[seq_trk] > 0u : set.oct < 0, up2 = pg ? seq_pg[seq_trk] + 1u < seq_pages(seq_trk) : set.oct > 0;
-            lit |= (play_on << 27) | ((uint32_t)(live.v[P_ARP_MODE] != 0) << 28) | (on << 29) | (up2 << 30) | (rec_on << 31);
+            lit |= (play_on << 27) | ((uint32_t)(ed_patch(P_ARP_MODE)->v[P_ARP_MODE] != 0) << 28) | (on << 29) | (up2 << 30) | (rec_on << 31);
         }
         if (lit != leds_prev || glow != glow_prev) {
             leds_prev = lit;

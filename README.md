@@ -95,7 +95,9 @@ UNISON sound keeps four of them for itself).
 - With track B chosen and its own sound, **the panel is on B's sound**: the program number and name turn orange
   with a B, the keys play it, every page edits it, PRESETS picks it, SAVE twice saves it into its program. ALGORITHM
   back to A and the panel is on sound A again.
-- The **arpeggiator and the effects are sound A's**. B goes into them by its **FX SEND** (TRACKS, KNOB 4:
+- **Each sound has its own arpeggiator**: the ARP page sets the arp of the sound the panel is on, and both can run
+  at once (A latched with HOLD, B played live). The **effects are sound A's**: B goes into them by its **FX SEND**
+  (TRACKS, KNOB 4:
   100 % = all of it, as A; less, and the rest passes them by, dry: a bass under a big reverb stays tight).
 
 | View | KNOB 1 | KNOB 2 | KNOB 3 | KNOB 4 |

@@ -75,8 +75,8 @@ static int16_t scope[SCOPE_N];
 static volatile uint32_t scope_state, scope_stride = 4;   /* 0 idle, 1 armed, 2 running, 3 done */
 
 /* ---- the held notes (ISR): in order of pressing, physically down or held by the pedal / latch */
-static struct { uint8_t note, vel, phys; } held[NHELD];
-static uint32_t nheld;
+static struct { uint8_t note, vel, phys; } held[2][NHELD];   /* per sound: A's keys, B's keys */
+static uint32_t nheld[2];
 static uint32_t rnd_state = 0x9E3779B9u;
 
 /* ---- the two sounds as the ISR sees them: the patch, its LFO (global per sound, as the originals'), the numbers
@@ -104,12 +104,12 @@ static void parts_point(void)                   /* which patch each part plays (
     }
 }
 
-static void held_remove(uint32_t note)
+static void held_remove(uint32_t p, uint32_t note)
 {
     uint32_t i, j;
-    for (i = j = 0; i < nheld; i++)
-        if (held[i].note != note) held[j++] = held[i];
-    nheld = j;
+    for (i = j = 0; i < nheld[p]; i++)
+        if (held[p][i].note != note) held[p][j++] = held[p][i];
+    nheld[p] = j;
 }
 
 /* ---- vintage: each voice card has its own small offsets, scaled by the knob */
@@ -224,20 +224,21 @@ static void voice_trigger(uint32_t part, uint32_t note, uint32_t vel)
     }
 }
 
-/* the key (or the arp, the sequencer) let go of a note. In MONO / UNISON a key still held takes over (legato:
- * the keys of sound A only, they have the held list) */
+/* the key (or the arp, the sequencer) let go of a note. In MONO / UNISON a key still held takes over (legato) */
 static void voice_release(uint32_t part, uint32_t note, uint32_t from_arp)
 {
-    uint32_t v, mode = pt[part].p->v[P_MODE];
-    if (!part && (mode == M_MONO || mode == M_UNISON) && !from_arp && nheld && live.v[P_ARP_MODE] == A_OFF) {
-        uint32_t n = uni_count(0), i;
-        if (vc[0].gate && vc[0].part == 0 && vc[0].note == note) {
+    const uint8_t *pv = pt[part].p->v;
+    uint32_t v, mode = pv[P_MODE];
+    if ((mode == M_MONO || mode == M_UNISON) && !from_arp && nheld[part] && pv[P_ARP_MODE] == A_OFF) {
+        uint32_t n = uni_count(part), i, lo, gn;
+        part_cards(part, &lo, &gn);
+        if (vc[lo].gate && vc[lo].part == part && vc[lo].note == note) {
             for (i = 0; i < n; i++) {
-                vc[i].note = held[nheld - 1u].note;
-                vc[i].target16 = (int32_t)vc[i].note << 16;
-                if (!live.v[P_GLIDE]) vc[i].pitch16 = vc[i].target16;
+                vc[lo + i].note = held[part][nheld[part] - 1u].note;
+                vc[lo + i].target16 = (int32_t)vc[lo + i].note << 16;
+                if (!pv[P_GLIDE]) vc[lo + i].pitch16 = vc[lo + i].target16;
             }
-            pt[0].last_pitch16 = vc[0].target16;
+            pt[part].last_pitch16 = vc[lo].target16;
         }
         return;
     }
@@ -270,32 +271,37 @@ static void click_start(uint32_t accent)        /* beat 1 higher and louder */
     click_inc = accent ? 233739600u : 155826400u;   /* 2400 / 1600 Hz in 2^32 / 44100 steps */
 }
 
-/* ---- the arpeggiator (per block, 0.36 ms steps) */
-static struct { uint32_t cnt, period, gate_at, pos, dir, sounding, note, was_on; } arp;
+/* ---- the arpeggiators (per block, 0.36 ms steps): one per sound, each on its own keys and its own ARP settings */
+typedef struct { uint32_t cnt, period, gate_at, pos, dir, sounding, note, was_on; } arp_t;
+static arp_t arp[2];
 
-/* ISR -> main loop: the notes the arp plays (REC records them, not the keys that feed it) */
+/* ISR -> main loop: the notes the arps play (REC records them, not the keys that feed them): on, note, part */
 #define AQ 32u
-static uint8_t arp_q[AQ][2];
+static uint8_t arp_q[AQ][3];
 static volatile uint32_t arp_qw, arp_qr;
-static void arp_post(uint32_t on, uint32_t note)
+static void arp_post(uint32_t p, uint32_t on, uint32_t note)
 {
     if (arp_qw - arp_qr >= AQ) return;
     arp_q[arp_qw % AQ][0] = (uint8_t)on;
     arp_q[arp_qw % AQ][1] = (uint8_t)note;
+    arp_q[arp_qw % AQ][2] = (uint8_t)p;
     RING_PUBLISH();
     arp_qw++;
 }
 
-static void arp_stop_note(void)
+static void arp_stop_note(uint32_t p)
 {
-    if (arp.sounding) { voice_release(0, arp.note, 1); arp.sounding = 0; arp_post(0, arp.note); }
+    arp_t *a = &arp[p];
+    if (a->sounding) { voice_release(p, a->note, 1); a->sounding = 0; arp_post(p, 0, a->note); }
 }
 
-static void arp_step(void)
+static void arp_step(uint32_t p)
 {
+    const uint8_t *pv = pt[p].p->v;
+    arp_t *a = &arp[p];
     uint8_t sorted[NHELD];
-    uint32_t i, j, n = nheld, oct = clampi(live.v[P_ARP_OCT], 1, 4), len, k, mode = live.v[P_ARP_MODE], idx;
-    for (i = 0; i < n; i++) sorted[i] = held[i].note;
+    uint32_t i, j, n = nheld[p], oct = clampi(pv[P_ARP_OCT], 1, 4), len, k, mode = pv[P_ARP_MODE], idx;
+    for (i = 0; i < n; i++) sorted[i] = held[p][i].note;
     if (mode != A_PLAY)
         for (i = 1; i < n; i++) {               /* insertion sort: 16 at most */
             uint8_t t = sorted[i];
@@ -306,108 +312,117 @@ static void arp_step(void)
     if (mode == A_RND)
         k = xorshift(&rnd_state) % len;
     else if (mode == A_UPDN && len > 2u) {
-        if (arp.pos >= 2u * len - 2u) arp.pos = 0;
-        k = arp.pos < len ? arp.pos : 2u * len - 2u - arp.pos;
-        arp.pos++;
+        if (a->pos >= 2u * len - 2u) a->pos = 0;
+        k = a->pos < len ? a->pos : 2u * len - 2u - a->pos;
+        a->pos++;
     } else {
-        if (arp.pos >= len) arp.pos = 0;
-        k = mode == A_DOWN ? len - 1u - arp.pos : arp.pos;
-        arp.pos++;
+        if (a->pos >= len) a->pos = 0;
+        k = mode == A_DOWN ? len - 1u - a->pos : a->pos;
+        a->pos++;
     }
     idx = k % n;
-    arp.note = (uint32_t)clampi((int32_t)sorted[idx] + 12 * (int32_t)(k / n), 0, 127);
+    a->note = (uint32_t)clampi((int32_t)sorted[idx] + 12 * (int32_t)(k / n), 0, 127);
     for (i = 0; i < n; i++)                     /* the velocity of that key */
-        if (held[i].note == sorted[idx]) break;
-    voice_trigger(0, arp.note, i < n ? held[i].vel : 100u);
-    arp_post(1, arp.note);
-    arp.sounding = 1;
+        if (held[p][i].note == sorted[idx]) break;
+    voice_trigger(p, a->note, i < n ? held[p][i].vel : 100u);
+    arp_post(p, 1, a->note);
+    a->sounding = 1;
     ui_arp_step++;
 }
 
-static void arp_tick(void)
+static void arp_tick(uint32_t p)
 {
-    uint32_t mode = live.v[P_ARP_MODE], div = DIV_PER_QUARTER[live.v[P_ARP_DIV] % NDIV], q;
+    const uint8_t *pv = pt[p].p->v;
+    arp_t *a = &arp[p];
+    uint32_t mode = pv[P_ARP_MODE], div = DIV_PER_QUARTER[pv[P_ARP_DIV] % NDIV], q;
     if (mode == A_OFF) {
-        if (arp.was_on) { arp_stop_note(); arp.was_on = 0; }
+        if (a->was_on) { arp_stop_note(p); a->was_on = 0; }
         return;
     }
-    if (!arp.was_on) { voices_release_part(0); arp.was_on = 1; arp.pos = 0; arp.cnt = 0xFFFFFFFFu; }
-    if (ctl_arp_restart) { ctl_arp_restart = 0; arp.pos = 0; arp.cnt = 0xFFFFFFFFu; }
-    if (!nheld) { arp_stop_note(); arp.pos = 0; arp.cnt = 0xFFFFFFFFu; return; }
+    if (!a->was_on) { voices_release_part(p); a->was_on = 1; a->pos = 0; a->cnt = 0xFFFFFFFFu; }
+    if (!nheld[p]) { arp_stop_note(p); a->pos = 0; a->cnt = 0xFFFFFFFFu; return; }
     q = ctl_ext_quarter ? ctl_ext_quarter : 60u * FS / clampi(ctl_tempo, 40, 240);
-    arp.period = q / div;
-    if (arp.period < CTL) arp.period = CTL;
-    arp.gate_at = (arp.period * (live.v[P_ARP_GATE] + 1u)) >> 7;
-    if (arp.cnt == 0xFFFFFFFFu || arp.cnt + CTL >= arp.period) {
-        arp.cnt = arp.cnt == 0xFFFFFFFFu ? 0 : arp.cnt + CTL - arp.period;
-        arp_stop_note();
-        arp_step();
+    a->period = q / div;
+    if (a->period < CTL) a->period = CTL;
+    a->gate_at = (a->period * (pv[P_ARP_GATE] + 1u)) >> 7;
+    if (a->cnt == 0xFFFFFFFFu || a->cnt + CTL >= a->period) {
+        a->cnt = a->cnt == 0xFFFFFFFFu ? 0 : a->cnt + CTL - a->period;
+        arp_stop_note(p);
+        arp_step(p);
     } else {
-        arp.cnt += CTL;
-        if (arp.sounding && arp.cnt >= arp.gate_at && live.v[P_ARP_GATE] < 127u) arp_stop_note();
+        a->cnt += CTL;
+        if (a->sounding && a->cnt >= a->gate_at && pv[P_ARP_GATE] < 127u) arp_stop_note(p);
     }
 }
 
-/* ---- note events (ISR) */
+/* ---- note events (ISR), per sound: its held keys, its arp; the pedal and HOLD hold both */
 static uint32_t sus_was;
-static void ev_note_on(uint32_t note, uint32_t vel)
+static void ev_note_on(uint32_t p, uint32_t note, uint32_t vel)
 {
-    uint32_t i, arp_on = live.v[P_ARP_MODE] != A_OFF, sus = ctl_sustain || ctl_hold;
+    uint32_t i, arp_on = pt[p].p->v[P_ARP_MODE] != A_OFF, sus = ctl_sustain || ctl_hold;
     if (arp_on && sus) {                        /* latch: a new chord after all keys were up starts over */
-        for (i = 0; i < nheld; i++)
-            if (held[i].phys) break;
-        if (i == nheld) { nheld = 0; arp.pos = 0; arp.cnt = 0xFFFFFFFFu; }
+        for (i = 0; i < nheld[p]; i++)
+            if (held[p][i].phys) break;
+        if (i == nheld[p]) { nheld[p] = 0; arp[p].pos = 0; arp[p].cnt = 0xFFFFFFFFu; }
     }
-    held_remove(note);
-    if (nheld == NHELD) { for (i = 1; i < NHELD; i++) held[i - 1u] = held[i]; nheld--; }
-    held[nheld].note = (uint8_t)note;
-    held[nheld].vel = (uint8_t)vel;
-    held[nheld].phys = 1;
-    nheld++;
+    held_remove(p, note);
+    if (nheld[p] == NHELD) { for (i = 1; i < NHELD; i++) held[p][i - 1u] = held[p][i]; nheld[p]--; }
+    held[p][nheld[p]].note = (uint8_t)note;
+    held[p][nheld[p]].vel = (uint8_t)vel;
+    held[p][nheld[p]].phys = 1;
+    nheld[p]++;
     if (arp_on) {
-        if (nheld == 1u) { arp.pos = 0; arp.cnt = 0xFFFFFFFFu; }   /* the first key: a step right away */
+        if (nheld[p] == 1u) { arp[p].pos = 0; arp[p].cnt = 0xFFFFFFFFu; }   /* the first key: a step right away */
         return;
     }
-    voice_trigger(0, note, vel);
+    voice_trigger(p, note, vel);
 }
 
-static void ev_note_off(uint32_t note)
+static void ev_note_off(uint32_t p, uint32_t note)
 {
     uint32_t i;
-    for (i = 0; i < nheld; i++)
-        if (held[i].note == note) held[i].phys = 0;
+    for (i = 0; i < nheld[p]; i++)
+        if (held[p][i].note == note) held[p][i].phys = 0;
     if (ctl_sustain || ctl_hold) return;        /* the pedal / HOLD keeps it */
-    held_remove(note);
-    if (live.v[P_ARP_MODE] != A_OFF) return;
-    voice_release(0, note, 0);
+    held_remove(p, note);
+    if (pt[p].p->v[P_ARP_MODE] != A_OFF) return;
+    voice_release(p, note, 0);
 }
 
 static void ev_sustain_up(void)                 /* the pedal / HOLD let go: what no key holds is released */
 {
-    uint32_t i, j, arp_on = live.v[P_ARP_MODE] != A_OFF;
-    uint8_t gone[NHELD], ng = 0;
-    for (i = j = 0; i < nheld; i++)
-        if (held[i].phys) held[j++] = held[i];
-        else gone[ng++] = held[i].note;
-    nheld = j;
-    if (arp_on) return;
-    for (i = 0; i < ng; i++) voice_release(0, gone[i], 0);
+    uint32_t p, i, j;
+    for (p = 0; p < 2u; p++) {
+        uint8_t gone[NHELD], ng = 0;
+        for (i = j = 0; i < nheld[p]; i++)
+            if (held[p][i].phys) held[p][j++] = held[p][i];
+            else gone[ng++] = held[p][i].note;
+        nheld[p] = j;
+        if (pt[p].p->v[P_ARP_MODE] != A_OFF) continue;
+        for (i = 0; i < ng; i++) voice_release(p, gone[i], 0);
+    }
+}
+
+static void parts_off(uint32_t p)               /* a sound gone (B back on A, a panic): its keys, its arp, its notes */
+{
+    nheld[p] = 0;
+    arp_stop_note(p);
+    arp[p].was_on = 0;
+    voices_release_part(p);
 }
 
 static void engine_events(void)
 {
     uint32_t sus = ctl_sustain || ctl_hold;
-    if (ctl_panic) { ctl_panic = 0; nheld = 0; voices_release_all(); arp_stop_note(); }
+    if (ctl_panic) { ctl_panic = 0; parts_off(0); parts_off(1); voices_release_all(); }
     if (!sus && sus_was) ev_sustain_up();
     sus_was = sus;
     while (nq_r != nq_w) {
         nev_t e = nq[nq_r % NQ];
+        uint32_t p = e.part && b_own;           /* (B without its own sound: its keys play A) */
         nq_r++;
-        if (e.part && b_own) {                  /* track B's sound from the keys: straight, no arp, no pedal */
-            if (e.type) voice_trigger(1, e.note, e.vel);
-            else voice_release(1, e.note, 1);
-        } else if (e.type) ev_note_on(e.note, e.vel);
-        else ev_note_off(e.note);
+        if (e.type) ev_note_on(p, e.note, e.vel);
+        else ev_note_off(p, e.note);
     }
 }
 
@@ -647,12 +662,14 @@ static void engine_audio(int32_t *out, uint32_t n)
         for (i = 0; i < 2u * n; i++) bus_b[i] = 0;
     for (b = 0; b < n; b += CTL) {
         parts_point();
-        if (was_own && !b_own) voices_release_part(1);   /* (B back on sound A: its own notes let go) */
+        if (was_own && !b_own) parts_off(1);    /* (B back on sound A: its own notes let go) */
         engine_events();
-        arp_tick();
+        if (ctl_arp_restart) { ctl_arp_restart = 0; arp[0].pos = arp[1].pos = 0; arp[0].cnt = arp[1].cnt = 0xFFFFFFFFu; }
+        arp_tick(0);
+        if (b_own) arp_tick(1);
         seq_tick();                             /* (may swap the pattern in, and B's sound with it) */
         parts_point();
-        if (was_own && !b_own) voices_release_part(1);
+        if (was_own && !b_own) parts_off(1);
         was_own = b_own;
         lfo_tick(&pt[0]);
         if (b_own) lfo_tick(&pt[1]);

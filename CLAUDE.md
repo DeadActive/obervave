@@ -61,7 +61,8 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   the ISR with the pattern); one sound's VOLUME is now in its voices, the output stage has only CC 7. MONO / UNISON
   take cards 0-3 (A) / 4-7 (B) when B has its own sound, POLY shares the 8 unless the other sound is a group.
   B's voices render into `bus_b`: its send joins A before the output stage and the effects, the rest gets its own
-  output stage after them. Arp and effects stay A's (`is_a_only`). The panel is on B's sound when track B is chosen
+  output stage after them. The effects stay A's (`is_a_only`); **each sound has its own arp** (the user 2026-10-16: "der Arpeggio geht nur auf
+  einer Spur"): `held[2][]`, `nheld[2]`, `arp[2]`, `arp_tick(p)`, arp_q carries the part; pedal / HOLD hold both. The panel is on B's sound when track B is chosen
   and has one (`ed_b()`, `ed_patch(p)`): keys (`play_note`, a note's part kept for its release), pages, PRESETS,
   SAVE x2, randomize; the header in B's orange. **TRACKS view** (SEQ view 0, the user 2026-10-16: "wie bei sloop,
   die Spuren untereinander"): A and B rows stacked (`ui_seq_track_row`: tile, sound, length, 16 steps, playhead),
