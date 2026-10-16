@@ -6,6 +6,7 @@
  * FL_DATA 0x9D000..0xBAFFF (the stock VM), as the fm1-to-smk37 kit lays it out:
  *   0x9D000          settings (globals + 32 user programs), the same sector format as on the FM-1
  *   0x9E000-0xA5FFF  sequencer patterns 1-8, one sector each
+ *   0xA6000-0xA7FFF  the 99 user programs, 50 a sector
  *   0xAF000          owner tag "SMK37DATA" + OBV_DATA_FAMILY: another firmware's data here is cleared, never parsed
  * The rest of FL_DATA stays unused. Calibration (0xC1000), BT pairing, USR and key_mac are never in reach:
  * FL_RANGE_OK below is the app's allow-list, and the RAM flash driver also refuses every protected range on its
@@ -17,12 +18,15 @@
 #define SETTINGS_MAX (4096u - 12u)              /* the sector minus the header (OberVave keeps 32 programs in it) */
 #define BLOBS_AT 0x0009E000u                    /* the sequencer patterns: NBLOB sectors */
 #define NBLOB 8u
+#define PSECT_AT 0x000A6000u                    /* the user programs: NPSECT sectors */
+#define NPSECT 2u
 #define OWNER_AT 0x000AF000u                    /* the store's owner tag (the kit's place for it) */
 #ifndef OBV_DATA_FAMILY
 #define OBV_DATA_FAMILY "OBERVAV"               /* (tools/build.py sets it: SMK_DATA_FAMILY) */
 #endif
 #define FL_RANGE_OK(off, n) (FL_IN(off, n, FL_OTA_LO, FL_OTA_HI) || FL_IN(off, n, SETTINGS_AT, SETTINGS_AT + 0x1000u) || \
-                             FL_IN(off, n, BLOBS_AT, BLOBS_AT + NBLOB * 0x1000u) || FL_IN(off, n, OWNER_AT, OWNER_AT + 0x1000u))
+                             FL_IN(off, n, BLOBS_AT, BLOBS_AT + NBLOB * 0x1000u) || \
+                             FL_IN(off, n, PSECT_AT, PSECT_AT + NPSECT * 0x1000u) || FL_IN(off, n, OWNER_AT, OWNER_AT + 0x1000u))
 #include "fm1_flash_map.h"
 
 #if !BOARD_SMK37
@@ -30,6 +34,7 @@
 #endif
 _Static_assert(SETTINGS_AT >= FL_DATA_LO && SETTINGS_AT + 0x1000u <= BLOBS_AT, "SMK store: settings outside FL_DATA");
 _Static_assert(BLOBS_AT + NBLOB * 0x1000u <= OWNER_AT, "SMK store: the patterns run into the owner tag");
+_Static_assert(BLOBS_AT + NBLOB * 0x1000u <= PSECT_AT && PSECT_AT + NPSECT * 0x1000u <= OWNER_AT, "SMK store: the programs overlap");
 _Static_assert(OWNER_AT + 0x1000u <= FL_DATA_HI, "SMK store: the owner tag outside FL_DATA");
 _Static_assert(FL_WIN_SAFE(SETTINGS_AT, OWNER_AT + 0x1000u), "SMK store: overlaps a protected range");
 _Static_assert(sizeof OBV_DATA_FAMILY - 1u >= 1u && sizeof OBV_DATA_FAMILY - 1u <= 7u, "SMK store: family 1..7 characters");

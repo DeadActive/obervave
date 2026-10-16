@@ -26,7 +26,8 @@ enum {
 #if NPARAM + PATCH_NAME > PATCH_BYTES
 #error "the patch outgrew PATCH_BYTES"
 #endif
-#define NPROG 32u
+#define NPROG 99u                               /* 1-64 factory sounds, 65-99 INIT; the user's saves over them */
+#define NFACT 64u
 
 enum { K_NUM, K_BIP, K_ONOFF, K_WAVE, K_FTYPE, K_MODE, K_LSHAPE, K_LPHASE, K_TO, K_ARP, K_DIV, K_SEMI, K_MS, K_HZ,
        K_PCT, K_CUT, K_OCT, K_MORPH, K_DDIV };

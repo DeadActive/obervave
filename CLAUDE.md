@@ -127,7 +127,7 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 ## Status (2026-10-13, third session)
 
-Released: **1.4.3** (2026-10-16, FM-1_954, tag v1.4.3: HOLD per sound, `ctl_hold` bit p; SMK-37 1.4.3-beta; installed on the user's FM-1, released at the user's word) after **1.4.2** (tag v1.4.2: keys and MIDI read while the screen draws; released without a device test) after **1.4.1** (tag v1.4.1: each sound its own arp) after **1.4** (tag v1.4: two sounds, track B's own program; the TRACKS view; tried on the
+Released: **1.5** (2026-10-16, FM-1_955, tag v1.5: 99 programs, 64 factory (33-64 new), 65-99 INIT; save as: SAVE, PRESETS = the slot, SAVE; the programs in 2 own flash sectors `psect` (FM-1 0x97000, SMK 0xA6000, 50 a sector), the settings sector only globals now (SET_VERSION 3, a v2 store's 32 programs move over at boot); SMK-37 1.5-beta; installed on the user's FM-1 and boots) after **1.4.3** (tag v1.4.3: HOLD per sound, `ctl_hold` bit p) after **1.4.2** (tag v1.4.2: keys and MIDI read while the screen draws; released without a device test) after **1.4.1** (tag v1.4.1: each sound its own arp) after **1.4** (tag v1.4: two sounds, track B's own program; the TRACKS view; tried on the
 user's FM-1 first) and **SMK-37 1.4-beta** (docs/firmware/smk37, tag smk37-v1.4-beta, not yet on a real SMK-37).
 Before: **1.3.1** (FM-1_953, tag v1.3.1: the tracks coloured, A blue / B orange) after **1.3** (tag v1.3: the full-screen sequencer as SLOOP's step page, patterns as
 zp12's loops); SMK-37 1.3.1-beta was tested on a real SMK-37 on 16.10.2026: works.
@@ -217,8 +217,8 @@ Priorities from the user: **the audio engine first, the look second**. Max depth
 
 - A patch = a byte array indexed by a parameter table {label, min, max, display kind} + a 10-char name. The UI,
   MIDI CC, randomizer and storage all walk that table.
-- 32 programs: factory set in const flash, user saves in the settings sector 0xFC000 (raise Dinghy's 256-byte
-  `settings_*` limit to the sector, one static buffer). Save only when silent (the erase stalls the audio).
+- 99 programs (1.5; was 32): 64 factory in const flash (`FACTORY[NFACT]`, `FACT_INIT` for 65-99), the user's in
+  `psect[2]` (own sectors, `prog_put`, saved with the settings when silent: the erase stalls the audio).
 - Factory sounds to make it shine: big brass stab, poly brass swell, sync-sweep lead, unison lead, string
   machine-ish PWM pad, bell-ish x-mod, fat bass (mono), arp sequence, sweep pad, 12 dB band-pass "quack" etc.
 

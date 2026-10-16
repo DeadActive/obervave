@@ -6,13 +6,17 @@
 
 OberVave turns the FM-1 into a single, deep instrument in the spirit of the classic American 8-voice poly synths of
 1979-84: two oscillators a voice with hard sync and cross-modulation, a 12 / 24 dB filter with an SEM-style
-lowpass-to-highpass morph, two envelopes, an LFO, an arpeggiator, a two-track step sequencer, 32 programs, and
+lowpass-to-highpass morph, two envelopes, an LFO, an arpeggiator, a two-track step sequencer, 99 programs (64 factory sounds), and
 three effects after the voices. No second engine: one synth, as far as the chip goes.
 
 <p align="center"><img src="docs/screen.png" width="240" alt="OberVave's screen: program 01 DARK ARP, the ARP page with four knobs, the scope, eight voice LEDs"></p>
 
-> **Status: 1.4.3, runs on the FM-1.** Install it from [thefirmwarehub.com](https://thefirmwarehub.com) or with
-> `tools/fm1_install.py docs/firmware/obervave-1.4.3.fwsc` (identity `FM-1_954`). 1.4.3 gives each sound its own HOLD:
+> **Status: 1.5, runs on the FM-1.** Install it from [thefirmwarehub.com](https://thefirmwarehub.com) or with
+> `tools/fm1_install.py docs/firmware/obervave-1.5.fwsc` (identity `FM-1_955`). 1.5 has 99 program slots: 64 factory
+> sounds (32 new ones on 33-64: arpeggios, brass, pads, keys, basses, leads, effects), 65-99 start as INIT. SAVE now
+> saves anywhere: tap SAVE, turn PRESETS to the slot (the header shows its number and what is there), tap SAVE again.
+> The programs saved with 1.4 come along on the first start.
+> 1.4.3 gave each sound its own HOLD:
 > the arp of track A and of track B latch on their own (one's HOLD held the other's notes, one's HOLD off stopped both).
 > 1.4.2 kept the notes in time while
 > the screen redraws (they stumbled under CC streams and live tweaking; chords on the SMK-37 came in staggered).
@@ -45,7 +49,7 @@ drums included, is this firmware.
 | **Vintage** | Each of the 8 voice cards has its own small tune, cutoff and envelope offsets, plus a slow random walk on pitch, all scaled by one knob. SPREAD pans the cards like the originals' pan pots. |
 | **Effects** | Chorus (two taps, Hermite-interpolated). Ping-pong delay in note values of the tempo (1/16 to 1/2, dotted and triplet), with feedback tone; the time slews like a tape when it changes. Plate reverb (Dattorro's figure-of-eight tank) at the full sample rate: SIZE, DAMP, PRE-DLY, MIX. |
 | **Arpeggiator** | UP, DOWN, UP/DN, RANDOM, AS PLAYED; 1-4 octaves; 1/4 to 1/32 with triplets; gate; latch (HOLD). Sample-exact, in the audio interrupt. Follows MIDI clock. |
-| **Sequencer** | Two tracks that share 256 steps (one track can have them all, or A and B split them). A step is a chord of up to 4 notes with velocity, gate or a tie into the next step, a ratchet (1-4 hits) and a chance. Each track has its own length (polymeters), note value (1/4 to 1/32 with triplets), swing and transpose, and can be muted. Step recording on its own full screen (a step cursor on KNOB 1, chords from the keys or MIDI, rests, ties) and live recording into the running loop, quantized to the nearest step. 8 patterns in flash, switched at the loop's end while it plays, saved by themselves. Sample-exact in the audio interrupt, follows MIDI clock, start and stop. Track B plays the OberVave sound of track A, or a sound of its own (any of the 32 programs, kept with the pattern): two sounds on the eight voices. |
+| **Sequencer** | Two tracks that share 256 steps (one track can have them all, or A and B split them). A step is a chord of up to 4 notes with velocity, gate or a tie into the next step, a ratchet (1-4 hits) and a chance. Each track has its own length (polymeters), note value (1/4 to 1/32 with triplets), swing and transpose, and can be muted. Step recording on its own full screen (a step cursor on KNOB 1, chords from the keys or MIDI, rests, ties) and live recording into the running loop, quantized to the nearest step. 8 patterns in flash, switched at the loop's end while it plays, saved by themselves. Sample-exact in the audio interrupt, follows MIDI clock, start and stop. Track B plays the OberVave sound of track A, or a sound of its own (any of the 99 programs, kept with the pattern): two sounds on the eight voices. |
 | **Programs** | 32: factory set in flash, your saves in the settings sector. 01 DARK ARP, 26 UPSIDE ARP, 29 NEON PAD are the dark ones; brass, strings, leads, basses, bells, pads, drums-from-a-filter for the rest. Hold SAVE and press the SELECT knob for a new one at random, within useful ranges. |
 | **MIDI** | USB-MIDI in and out. Notes, velocity, pitch bend (range 0-24), program change, sustain, mod wheel, clock / start / continue, MIDI channel or OMNI (with a channel set, the next channel plays track B's own sound: notes, CC, program change). CC 74 cutoff, 71 resonance, 73 / 72 amp attack / release, 5 glide, 1 mod depth, 7 volume, 64 sustain, 120 / 123 all off; every other parameter from CC 20 up in the order of the parameter table (see `firmware/src/obv_params.h` and CLAUDE.md). |
 
@@ -63,7 +67,7 @@ while a layer is held locks it open; its button lets it go.
 | **SEQ** | steps 1-16 of the page (tap: set with the last note or chord / clear; hold + a later step: one long note); black keys F#3 .. A#4: page 1-8 | NOTE · DIV · SWING · LENGTH; a step held: NOTE · LEVEL · RATCHET · GATE | the sequencer (full screen); again: its next view |
 | **EDIT** | erase that note (playing: as the playhead passes) | SHIFT · LENGTH x2 / 1/2 · TRANSPOSE | OSC / FILTER pages |
 | **GLO** | 1 / 2 mute track A / B, 5 / 6 solo, G5 tap tempo | - | GLOBAL (TEMPO, CLICK, MIDI CH, TUNE; the CPU time in its title) / VOICE / OUTPUT |
-| **SAVE** | white 1-8: go to pattern 1-8; black 1-8 (F#3 .. A#4): copy this pattern there (with SELECT pressed: a random sound) | - | twice: save the program; in the sequencer: save the pattern now |
+| **SAVE** | white 1-8: go to pattern 1-8; black 1-8 (F#3 .. A#4): copy this pattern there (with SELECT pressed: a random sound) | - | twice: save the program (PRESETS in between: into another slot); in the sequencer: save the pattern now |
 | **FX** | notes | CHORUS · DELAY · REVERB mix · DELAY TIME | CHORUS / DELAY / REVERB |
 
 - **PLAY** start / stop (the light flashes on the beat). **REC** playing: record now on top (chords, held notes

@@ -108,6 +108,14 @@ static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint1
 static uint8_t host_store[SETTINGS_MAX + 4];
 static int settings_load(void *p, uint32_t n)
 {
+    static int v2_done;
+    if (!v2_done && getenv("OBV_V2")) {         /* (test: a 1.4 store: program 4 the user's, "MMMMMMMMMM") */
+        v2_done = 1;
+        host_store[0] = 1;
+        host_store[4] = 2; host_store[5] = 3; host_store[6] = 100;   /* version 2, program 4, 100 BPM */
+        host_store[4 + 8] = 1u << 3;            /* used: bit 3 */
+        memset(host_store + 4 + 12 + 3 * 80, 'M', 80);
+    }
     if (host_store[0] != 1 || n > SETTINGS_MAX) return -1;
     memcpy(p, host_store + 4, n);
     return 0;
@@ -133,6 +141,22 @@ static int blob_save(uint32_t i, const void *p, uint32_t n)
     host_blob[i][0] = 1;
     memcpy(host_blob[i] + 4, p, n);
     printf("%6u ms  blob %u saved (%u B)\n", fm1_ms, i, n);
+    return 0;
+}
+#define NPSECT 2u
+static uint8_t host_psect[NPSECT][SETTINGS_MAX + 4];
+static int psect_load(uint32_t i, void *p, uint32_t n)
+{
+    if (i >= NPSECT || host_psect[i][0] != 1 || n > SETTINGS_MAX) return -1;
+    memcpy(p, host_psect[i] + 4, n);
+    return 0;
+}
+static int psect_save(uint32_t i, const void *p, uint32_t n)
+{
+    if (i >= NPSECT || n > SETTINGS_MAX) return -1;
+    host_psect[i][0] = 1;
+    memcpy(host_psect[i] + 4, p, n);
+    printf("%6u ms  programs %u saved (%u B)\n", fm1_ms, i, n);
     return 0;
 }
 

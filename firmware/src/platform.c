@@ -122,8 +122,10 @@ static volatile uint32_t fm1_ms;                /* milliseconds since power-on (
 #define SETTINGS_MAX (4096u - 12u)              /* the sector minus the header (OberVave keeps 32 programs in it) */
 #define BLOBS_AT 0x000F4000u                    /* OberVave's sequencer patterns: 8 sectors below the settings, free on the FM-1 */
 #define NBLOB 8u
+#define PSECT_AT 0x00097000u                    /* the 99 programs: 2 sectors at the start of Felucca's store (FL_DATA) */
+#define NPSECT 2u
 #define FL_RANGE_OK(off, n) (FL_IN(off, n, FL_OTA_LO, FL_OTA_HI) || FL_IN(off, n, SETTINGS_AT, SETTINGS_AT + 0x1000u) || \
-                             FL_IN(off, n, BLOBS_AT, BLOBS_AT + NBLOB * 0x1000u))
+                             FL_IN(off, n, BLOBS_AT, BLOBS_AT + NBLOB * 0x1000u) || FL_IN(off, n, PSECT_AT, PSECT_AT + NPSECT * 0x1000u))
 #endif
 #include "fm1_flash.h"
 static uint8_t flash_ok;
@@ -238,6 +240,14 @@ static int settings_save(const void *p, uint32_t n) { return sector_save(SETTING
 /* blob i (0..NBLOB-1): one more sector each, the same format (OberVave: a sequencer pattern) */
 static int blob_load(uint32_t i, void *p, uint32_t n) { return i < NBLOB ? sector_load(BLOBS_AT + i * 0x1000u, p, n) : -1; }
 static int blob_save(uint32_t i, const void *p, uint32_t n) { return i < NBLOB ? sector_save(BLOBS_AT + i * 0x1000u, p, n) : -1; }
+/* program sector i (0..NPSECT-1): the same format (OberVave: 50 user programs each) */
+static int psect_load(uint32_t i, void *p, uint32_t n) { return i < NPSECT ? sector_load(PSECT_AT + i * 0x1000u, p, n) : -1; }
+static int psect_save(uint32_t i, const void *p, uint32_t n)
+{
+    if (i >= NPSECT) return -1;
+    fm1_wdt_feed();                             /* (one save may erase several sectors in a row) */
+    return sector_save(PSECT_AT + i * 0x1000u, p, n);
+}
 #if BOARD_SMK37
 /* the store's owner (the kit's convention, smk_store.h): our tag, load as ever; anything else (the stock settings,
  * another port's data) is cleared once and the tag written, before the audio starts */
@@ -260,6 +270,10 @@ static void smk_owner_check(void)
     for (i = 0; i < NBLOB; i++) {
         fm1_wdt_feed();                         /* (~50 ms an erase) */
         fl_erase4k(BLOBS_AT + i * 0x1000u, &took);
+    }
+    for (i = 0; i < NPSECT; i++) {
+        fm1_wdt_feed();
+        fl_erase4k(PSECT_AT + i * 0x1000u, &took);
     }
     fl_erase4k(OWNER_AT, &took);
     fl_write(OWNER_AT, want, 16);

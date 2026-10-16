@@ -33,17 +33,30 @@ static void app_audio(int32_t *out, uint32_t n)
 }
 
 /* ---- what survives a power-off: the user programs and the globals, one settings sector */
-#define SET_VERSION 2u                          /* 2: 80-byte patches (the effects) */
+#define SET_VERSION 3u                          /* 3: the programs in their own sectors (99); 2: 32 in here, 80 bytes */
 static struct {
     uint8_t version, prog, tempo, midi_ch;      /* midi_ch 0 = omni, else 1..16 */
     int8_t tune, oct;
     uint8_t pat, click;                         /* pat: the sequencer pattern (its own sectors); click: CLICK_* */
-    uint32_t used;                              /* bit n: user program n saved */
-    patch_t user[NPROG];
 } set;
+typedef struct {                                /* SET_VERSION 2 (1.4.3 and before): read once, to bring the programs over */
+    uint8_t version, prog, tempo, midi_ch;
+    int8_t tune, oct;
+    uint8_t pat, click;
+    uint32_t used;
+    patch_t user[32];
+} set_v2_t;
 static uint32_t set_dirty, set_t;
+/* the user's programs: PS_N to a flash sector (psect_load / psect_save), all of them in RAM */
+#define PS_N 50u
+#define PS_TAG 0x50564F42u                      /* "BOVP" */
+typedef struct { uint32_t tag; uint8_t used[PS_N], pad[2]; patch_t p[PS_N]; } psect_t;
+_Static_assert(sizeof(psect_t) <= SETTINGS_MAX, "a program sector outgrew its flash sector");
+_Static_assert(NPSECT * PS_N >= NPROG, "too few program sectors");
+static psect_t psect[NPSECT];
+static uint32_t ps_dirty;                       /* bit i: program sector i to save */
 
-static uint32_t prog, edited, page = PG_PERFORM, hold, save_armed, save_t;   /* hold: bit p = sound p's HOLD */
+static uint32_t prog, edited, page = PG_PERFORM, hold, save_armed, save_t, save_to;   /* save_to: SAVE's slot (PRESETS) */   /* hold: bit p = sound p's HOLD */
 static uint32_t edited_b, b_loaded;             /* track B's own sound: edited; the B_PROG whose sound is in live_b */
 
 /* the sequencer, as the panel sees it */
@@ -130,11 +143,20 @@ static uint32_t level_of(uint32_t vel) { return vel <= 50u ? 0u : vel <= 85u ? 1
 static uint32_t seq_pages(uint32_t t) { return pat.trk[t].len ? (pat.trk[t].len + 15u) / 16u : 1u; }
 static uint8_t cc_map[128];                     /* MIDI CC -> parameter + 1, 0 = none */
 
-static void prog_get(uint32_t n, patch_t *p)    /* program n: the user's, else the factory's */
+static void prog_get(uint32_t n, patch_t *p)    /* program n: the user's, else the factory's (65-99: INIT) */
 {
     n %= NPROG;
-    if (set.used >> n & 1u) *p = set.user[n];
-    else patch_from_factory(p, &FACTORY[n]);
+    if (psect[n / PS_N].used[n % PS_N]) *p = psect[n / PS_N].p[n % PS_N];
+    else patch_from_factory(p, n < NFACT ? &FACTORY[n] : &FACT_INIT);
+}
+
+static void prog_put(uint32_t n, const patch_t *p)   /* program n is the user's now; saved when quiet */
+{
+    n %= NPROG;
+    psect[n / PS_N].p[n % PS_N] = *p;
+    psect[n / PS_N].used[n % PS_N] = 1;
+    ps_dirty |= 1u << (n / PS_N);
+    set_t = fm1_ms;
 }
 
 static void load_program(uint32_t n)
@@ -424,6 +446,13 @@ static void draw_header(void)
 {
     char tags[40];
     tags[0] = 0;
+    if (save_armed) {                           /* SAVE armed: the slot it saves into and what is there now */
+        patch_t t;
+        prog_get(save_to, &t);
+        scat(tags, "SAVE HERE? " NM_PRESETS);
+        ui_header(save_to, t.v + NPARAM, 0, tags, ed_b());
+        return;
+    }
     if (cut_shown_t && fm1_ms + 1u - cut_shown_t < 1000u) {
         char v[12];
         param_value(v, P_CUTOFF, ed_patch(P_CUTOFF)->v[P_CUTOFF]);
@@ -1378,8 +1407,8 @@ static void midi_in(uint32_t notes_only)
             dirty_page |= rec || is_seq_page(page); dirty_steps = 1;
         }
         else if (kind == 0xE0u) ctl_bend = (int32_t)(d1 | d2 << 7) - 8192;
-        else if (kind == 0xC0u && ed_b()) { b_set(d1 % NPROG + 1u); dirty_hdr = dirty_page = dirty_tags = 1; }
-        else if (kind == 0xC0u) { load_program(d1); dirty_hdr = dirty_page = dirty_tags = 1; set.prog = (uint8_t)prog; }
+        else if (kind == 0xC0u && ed_b() && d1 < NPROG) { b_set(d1 + 1u); dirty_hdr = dirty_page = dirty_tags = 1; }
+        else if (kind == 0xC0u && d1 < NPROG) { load_program(d1); dirty_hdr = dirty_page = dirty_tags = 1; set.prog = (uint8_t)prog; }
         else if (kind == 0xB0u) {
             if (d1 == 7u) ctl_cc7 = d2;
             else if (d1 == 64u) ctl_sustain = d2 >= 64u;
@@ -1415,13 +1444,30 @@ static void app_main(void)
 #endif
     engine_init();
     cc_map_init();
-    set.version = 0;
-    if (settings_load(&set, sizeof set) || set.version != SET_VERSION) {
+    {
         uint32_t n;
-        for (n = 0; n < sizeof set; n++) ((uint8_t *)&set)[n] = 0;
-        set.version = SET_VERSION;
-        set.tempo = 120;
+        for (n = 0; n < NPSECT; n++)
+            if (psect_load(n, &psect[n], sizeof psect[n]) || psect[n].tag != PS_TAG) {
+                memset(&psect[n], 0, sizeof psect[n]);
+                psect[n].tag = PS_TAG;
+            }
+        set.version = 0;
+        if (settings_load(&set, sizeof set) || set.version != SET_VERSION) {
+            static set_v2_t old __attribute__((section(".pool")));
+            memset(&set, 0, sizeof set);
+            set.version = SET_VERSION;
+            set.tempo = 120;
+            old.version = 0;
+            if (!settings_load(&old, sizeof old) && old.version == 2u) {   /* 1.4.x: its globals and 32 programs move */
+                set.prog = old.prog; set.tempo = old.tempo; set.midi_ch = old.midi_ch;
+                set.tune = old.tune; set.oct = old.oct; set.pat = old.pat; set.click = old.click;
+                for (n = 0; n < 32u; n++)
+                    if (old.used >> n & 1u) prog_put(n, &old.user[n]);
+                set_dirty = 1;                  /* (the programs are written first, then these) */
+            }
+        }
     }
+    if (set.prog >= NPROG) set.prog = 0;
     if (set.tempo < 40u || set.tempo > 240u) set.tempo = 120;
     if (set.oct < -2 || set.oct > 2) set.oct = 0;
     if (set.midi_ch > 16u) set.midi_ch = 0;
@@ -1492,18 +1538,23 @@ static void app_main(void)
                         else if (is_seq_page(page)) {   /* in the sequencer: PATTERNS; there, save in the slot */
                             pat_save_to(set.pat);   /* (as zp12: SAVE saves now; playing, at the stop) */
                             entry_reset();
-                        } else if (save_armed) {      /* SAVE tapped twice: the program */
-                            if (ed_b()) {   /* (track B's own sound: into its program) */
-                                uint32_t n = pat.trk[1].B_PROG - 1u;
-                                set.user[n] = live_b; set.used |= 1u << n; edited_b = 0; set_dirty = 1; set_t = fm1_ms;
+                        } else if (save_armed) {      /* SAVE tapped twice: into the slot (PRESETS in between: another) */
+                            uint32_t n = save_to % NPROG;
+                            if (ed_b()) {   /* (track B's own sound: B takes that program) */
+                                patch_t sb = live_b;
+                                prog_put(n, &sb);
+                                b_set(n + 1u);
+                                live_b = sb; edited_b = 0;
                                 if (n == prog && !edited) live = live_b;   /* (A on the same program hears it too) */
                             } else {
-                                set.user[prog] = live; set.used |= 1u << prog; set.prog = (uint8_t)prog; edited = 0; set_dirty = 1; set_t = fm1_ms;
-                                if (pat.trk[1].B_PROG == prog + 1u && !edited_b) live_b = live;
+                                prog_put(n, &live);
+                                prog = n; set.prog = (uint8_t)n; edited = 0; set_dirty = 1;
+                                if (pat.trk[1].B_PROG == n + 1u && !edited_b) live_b = live;
                             }
                             save_armed = 0;
-                            dirty_hdr = 1;
-                        } else { save_armed = 1; save_t = fm1_ms; }
+                            say("SAVED");
+                            dirty_hdr = dirty_tags = 1;
+                        } else { save_armed = 1; save_t = fm1_ms; save_to = ed_prog(); dirty_hdr = 1; }
                     }
                     layer = L_NONE;
                     memset(erase_on, 0, sizeof erase_on);
@@ -1588,9 +1639,10 @@ static void app_main(void)
             randomize();
             layer_used = 1;
             save_armed = 0;
+            dirty_hdr = 1;
             dirty_hdr = dirty_tags = dirty_page = 1;
         }
-        if (save_armed && fm1_ms - save_t > 3000u) { save_armed = 0; dirty_page = 1; }
+        if (save_armed && fm1_ms - save_t > 3000u) { save_armed = 0; dirty_page = dirty_hdr = 1; }
         if (np != page) {
             if (layer_lock) { layer = L_NONE; layer_lock = 0; }
             if (is_seq_page(np) != is_seq_page(page)) {   /* into / out of the full-screen sequencer: all new */
@@ -1606,6 +1658,10 @@ static void app_main(void)
             uint32_t from = pat_queue ? pat_queue - 1u : set.pat;
             pat_go((uint32_t)clampi((int32_t)from + (e > 0 ? 1 : -1), 0, NPAT - 1));
             dirty_hdr = dirty_page = dirty_steps = 1;
+        } else if (e && save_armed) {           /* SAVE armed: PRESETS picks the slot to save into ("save as") */
+            save_to = (uint32_t)((int32_t)save_to + e + (int32_t)NPROG * 4) % NPROG;
+            save_t = fm1_ms;
+            dirty_hdr = 1;
         } else if (e && seq_trk) {              /* track B chosen (as SLOOP): its sound. Down to 0 = it plays A; up from
                                                  * there, A's program as B's own first */
             int32_t n1 = pat.trk[1].B_PROG ? (int32_t)pat.trk[1].B_PROG + e : e > 0 ? (int32_t)prog + 1 : 0;
@@ -1832,8 +1888,12 @@ static void app_main(void)
         }
         }
         idle_ok = 0;
-        if (set_dirty && !ctl_seq_run && engine_quiet() && fm1_ms - set_t > 2000u) {   /* when silent: an erase stalls the sound */
-            settings_save(&set, sizeof set);
+        if ((set_dirty || ps_dirty) && !ctl_seq_run && engine_quiet() && fm1_ms - set_t > 2000u) {   /* when silent: an erase stalls the sound */
+            uint32_t i;
+            for (i = 0; i < NPSECT; i++)        /* the programs before the settings (a 1.4 update: they leave the settings) */
+                if (ps_dirty >> i & 1u) psect_save(i, &psect[i], sizeof psect[i]);
+            ps_dirty = 0;
+            if (set_dirty) settings_save(&set, sizeof set);
             set_dirty = 0;
         }
         /* the patterns: saved by themselves (3 s after an edit, once stopped), as asked, or left while playing;
