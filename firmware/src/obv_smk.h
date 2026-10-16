@@ -84,8 +84,8 @@ static void smk_pads(uint32_t base, uint32_t *dirty)
                     uint32_t n = q < (pen_n ? pen_n : 1u) ? (pen_n ? pen_chord[q] : pen) : 0u;
                     smk_live[p][q] = (uint8_t)n;
                     if (!n) continue;
-                    note_event(1, n, vel); midi_send(0x90, n, vel);
-                    if (!live.v[P_ARP_MODE]) rec_note(1, n, vel);
+                    play_note(1, n, vel); midi_send(0x90, n, vel);
+                    if (rec_keys()) rec_note(1, n, vel);
                 }
             } else {                                /* a step: as its white key in the SEQ layer */
                 smk_pads_held |= 1u << p;
@@ -106,8 +106,8 @@ static void smk_pads(uint32_t base, uint32_t *dirty)
                 uint32_t n = smk_live[p][q];
                 smk_live[p][q] = 0;
                 if (!n) continue;
-                note_event(0, n, 0); midi_send(0x80, n, 0);
-                if (!live.v[P_ARP_MODE]) rec_note(0, n, 0);
+                play_note(0, n, 0); midi_send(0x80, n, 0);
+                if (rec_keys()) rec_note(0, n, 0);
             }
         }
         *dirty = 1;
@@ -124,8 +124,8 @@ static void smk_pads(uint32_t base, uint32_t *dirty)
                 erase_note(n);
                 say("ERASED");
             } else {
-                note_event(1, n, vel); midi_send(0x90, n, vel);
-                if (!live.v[P_ARP_MODE]) rec_note(1, n, vel);
+                play_note(1, n, vel); midi_send(0x90, n, vel);
+                if (rec_keys()) rec_note(1, n, vel);
                 pen_add(n);
             }
         } else if (smk_ext_note[kk]) {
@@ -133,8 +133,8 @@ static void smk_pads(uint32_t base, uint32_t *dirty)
             smk_ext_note[kk] = 0;
             if (smk_ext_erase[kk]) erase_on[(uint32_t)clampi((int32_t)n - pat.trk[seq_trk].transp, 1, 127)] = 0;
             else {
-                note_event(0, n, 0); midi_send(0x80, n, 0);
-                if (!live.v[P_ARP_MODE]) rec_note(0, n, 0);
+                play_note(0, n, 0); midi_send(0x80, n, 0);
+                if (rec_keys()) rec_note(0, n, 0);
                 if (notes_down) notes_down--;
             }
         }
@@ -185,7 +185,7 @@ static void smk_faders(uint32_t *dirty_page, uint32_t *dirty_hdr, uint32_t *dirt
         smk_fad_last[i] = (uint8_t)v;
         if (p >= 0) {
             set_param((uint32_t)p, (int32_t)(v * PDEF[p].max + 63u) / 127);
-            param_value(val, (uint32_t)p, live.v[p]);
+            param_value(val, (uint32_t)p, ed_patch((uint32_t)p)->v[p]);
             if (p == P_CUTOFF) cut_shown_t = fm1_ms + 1u;
             *dirty_page = *dirty_hdr = 1;
             if (smk_bank) *dirty_tags = 1;      /* (the FX tag) */

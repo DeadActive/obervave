@@ -54,6 +54,18 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   stop); SAVE tapped = save now (playing: at the stop); SAVE held + white 1-8 go, + black 1-8 copy (a used slot:
   press again). Autosave 3 s after an edit once stopped. KNOB 1 on an off track gives it 16 steps; a fast LENGTH
   turn jumps by 16. Host scripts: tests/seq_view.txt, seq_trackb.txt, seq_patterns.txt. Released in 1.3 for both boards.
+  **Two sounds (2026-10-16, a user of the hub: "if the sequencer could play 2 sounds in 2 tracks")**: track B plays
+  sound A, or its own program: `trk[1].pad[0]` = B_PROG (program + 1, 0 = A), `pad[1]` = B_DRY (0 = all of B into
+  the effects, 127 = all dry), so old patterns stay as they were. The engine has two parts (`part_t pt[2]`: patch,
+  LFO, the per-block numbers; `voice_t.part`; `live`, `live_b`, `live_bq` = the queued pattern's B, swapped in by
+  the ISR with the pattern); one sound's VOLUME is now in its voices, the output stage has only CC 7. MONO / UNISON
+  take cards 0-3 (A) / 4-7 (B) when B has its own sound, POLY shares the 8 unless the other sound is a group.
+  B's voices render into `bus_b`: its send joins A before the output stage and the effects, the rest gets its own
+  output stage after them. Arp and effects stay A's (`is_a_only`). The panel is on B's sound when track B is chosen
+  and has one (`ed_b()`, `ed_patch(p)`): keys (`play_note`, a note's part kept for its release), pages, PRESETS,
+  SAVE x2, randomize; the header in B's orange. SOUND view (SEQ view 4): program (`= A`), LEVEL, CUTOFF, FX SEND.
+  MIDI: with a channel set, channel + 1 = B's sound (notes, CC, program change). Cost on the host: one sound +4 %
+  (~1010 instr/sample on seq_view.txt, was 970). Host scripts: tests/seq_two_sounds.txt, seq_two_patterns.txt.
   The click (set.click, the old pad byte: OFF / REC / ON / COUNT-IN, GLOBAL page KNOB 2; the CPU time moved to that
   page's title): a 6 ms square after the effects, 2.4 kHz on beat 1, 1.6 kHz else (obv_engine.h); COUNT-IN: REC
   armed + PLAY counts a bar (ctl_count, the tracks start after it, notes in it only sound).

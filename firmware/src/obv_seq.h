@@ -2,7 +2,8 @@
 /* The step sequencer: two tracks that share 256 steps (A from the front, B from the back, so a length change
  * never moves the other track's steps). A step holds a chord of up to four notes, a velocity, a gate (or a tie
  * into the next step), a ratchet (1-4 hits) and a chance. Each track has its own length, note value, swing and
- * transpose; both play the one OberVave sound, straight into the voices (not through the arpeggiator).
+ * transpose. A plays sound A; B plays it too, or its own program (trk[1].pad[0] = program + 1, pad[1] = how much of
+ * it passes the effects by, 0 = none), straight into the voices (not through the arpeggiator).
  * The player runs in the audio ISR per control block, as the arpeggiator does; the main loop edits `pat`. */
 #define SEQ_STEPS 256u
 #define SEQ_CHORD 4u
@@ -12,11 +13,15 @@
 
 typedef struct { uint8_t note[SEQ_CHORD], vel, gate, ratch, chance; } step_t;   /* note 0 = none; ratch 0..3 = 1..4 hits */
 #define STEP_OFF 0x80u                          /* in ratch: the step is switched off, its notes kept */
-typedef struct { uint16_t len; uint8_t div, swing; int8_t transp; uint8_t mute, pad[2]; } seqtrk_t;   /* swing 50..75 % */
+typedef struct { uint16_t len; uint8_t div, swing; int8_t transp; uint8_t mute, pad[2]; } seqtrk_t;   /* swing 50..75 %; pad: B's sound */
+#define B_PROG pad[0]                           /* track B: its own program + 1, 0 = it plays sound A */
+#define B_DRY pad[1]                            /* track B's own sound: 0 all into the effects .. 127 all dry */
 typedef struct { uint32_t magic; seqtrk_t trk[2]; step_t st[SEQ_STEPS]; } pattern_t;
 
 static pattern_t pat;                           /* the pattern now: the main loop edits, the ISR plays */
 static step_t *seq_step(uint32_t t, uint32_t i) { return &pat.st[t ? SEQ_STEPS - 1u - i : i]; }
+static uint32_t seq_b_own(void) { return pat.trk[1].B_PROG != 0u; }
+static uint32_t seq_b_dry(void) { return b_own ? (pat.trk[1].B_DRY > 127u ? 127u : pat.trk[1].B_DRY) : 0u; }
 
 /* main loop -> ISR */
 static volatile uint32_t ctl_seq_run, ctl_seq_restart;
@@ -58,15 +63,16 @@ static void pat_factory(uint32_t n, pattern_t *p)   /* a pattern never saved: em
 }
 
 /* ---- the player (ISR, per CTL block) */
-typedef struct { uint32_t cnt, dur, step, sub, rat_n, rat_i, gate_at, nsnd, play, tie; uint8_t snd[SEQ_CHORD]; } seqrun_t;
+typedef struct { uint32_t cnt, dur, step, sub, rat_n, rat_i, gate_at, nsnd, play, tie, part; uint8_t snd[SEQ_CHORD]; } seqrun_t;
 static seqrun_t sr[2];
 static uint32_t seq_was, seq_beat_cnt, seq_beat_n, count_left;
 
 static void seq_release(seqrun_t *r)
 {
     uint32_t i;
-    for (i = 0; i < r->nsnd; i++) voice_release(r->snd[i], 1);
+    for (i = 0; i < r->nsnd; i++) voice_release(r->part, r->snd[i], 1);
     r->nsnd = 0;
+    r->part = r == &sr[1] && b_own;             /* (what sounds lets go by the part it began on) */
 }
 static uint32_t seq_note(const step_t *s, uint32_t i, int32_t transp)
 {
@@ -77,7 +83,7 @@ static void seq_sound(seqrun_t *r, const step_t *s, int32_t transp)
     uint32_t i;
     for (i = 0; i < SEQ_CHORD && s->note[i] && r->nsnd < SEQ_CHORD; i++) {
         uint32_t n = seq_note(s, i, transp);
-        voice_trigger(n, s->vel ? s->vel : 100u);
+        voice_trigger(r->part, n, s->vel ? s->vel : 100u);
         r->snd[r->nsnd++] = (uint8_t)n;
     }
 }
@@ -95,7 +101,7 @@ static void seq_tie_into(seqrun_t *r, const step_t *s, int32_t transp, uint32_t 
     uint32_t i, j, keep = 0;
     for (i = j = 0; i < r->nsnd; i++) {
         if (play && seq_has(s, r->snd[i], transp)) { r->snd[j++] = r->snd[i]; keep++; }
-        else voice_release(r->snd[i], 1);
+        else voice_release(r->part, r->snd[i], 1);
     }
     r->nsnd = j;
     if (!play) return;
@@ -103,7 +109,7 @@ static void seq_tie_into(seqrun_t *r, const step_t *s, int32_t transp, uint32_t 
         uint32_t m = seq_note(s, i, transp);
         for (j = 0; j < keep && r->snd[j] != m; j++) ;
         if (j < keep) continue;
-        voice_trigger(m, s->vel ? s->vel : 100u);
+        voice_trigger(r->part, m, s->vel ? s->vel : 100u);
         r->snd[r->nsnd++] = (uint8_t)m;
     }
 }
@@ -157,7 +163,9 @@ static void seq_tick(void)
             if (t == 0u && r->step == 0u && ctl_pat_swap) {   /* track A from the top: the next pattern */
                 if (ctl_pat_keep) pat_old = pat;
                 pat = pat_q;
+                if (ctl_bq_swap) { live_b = live_bq; ctl_bq_swap = 0; }   /* B's sound comes along */
                 ctl_pat_swap = 0;
+                parts_point();
                 ui_pat_swapped++;
                 len = k->len;
             }

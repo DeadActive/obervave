@@ -146,17 +146,20 @@ static void draw_logo_small(int32_t x, int32_t y)   /* "OBERVAVE" in FONT_S with
 }
 
 /* ---- the parts of the screen (the app decides when) */
-static void ui_header(uint32_t prog, const uint8_t *name, uint32_t edited, const char *tags)
+#define C_TRK_B RGB(255, 150, 40)               /* track B's orange */
+/* b: the panel is on track B's own sound (its program number and name in B's orange, a B before the name) */
+static void ui_header(uint32_t prog, const uint8_t *name, uint32_t edited, const char *tags, uint32_t b)
 {
     char n[PATCH_NAME + 2];
     uint32_t i;
     cv_begin(240, 44, C_PANEL);
-    cv_seg7(6, 6, (prog + 1u) / 10u, C_RED, C_RED_DIM);
-    cv_seg7(26, 6, (prog + 1u) % 10u, C_RED, C_RED_DIM);
+    cv_seg7(6, 6, (prog + 1u) / 10u, b ? C_TRK_B : C_RED, C_RED_DIM);
+    cv_seg7(26, 6, (prog + 1u) % 10u, b ? C_TRK_B : C_RED, C_RED_DIM);
     for (i = 0; i < PATCH_NAME; i++) n[i] = (char)name[i];
     n[PATCH_NAME] = edited ? '*' : 0;
     n[PATCH_NAME + 1] = 0;
-    cv_text(54, 4, &FONT_S, n, C_CREAM);
+    if (b) cv_text(54, 4, &FONT_S, "B", C_TRK_B);
+    cv_text(b ? 66 : 54, 4, &FONT_S, n, b ? C_TRK_B : C_CREAM);
     cv_text(54, 22, &FONT_S, tags, C_DIMT);
     draw_logo_small(240 - 4 - text_w(&FONT_S, "OBERVAVE"), 4);
     cv_rect(0, 42, 240, 1, C_RULE);
@@ -272,8 +275,7 @@ static void ui_hints(const char *l1, const char *l2, uint16_t c1)
  *   136..187  a line (what the step holds, or a message), then up to 64 steps as small cells (the roll's 16 lit)
  *   188..239  the four knobs as label, value and a bar */
 /* the tracks' colours, everywhere in the sequencer (the user: "not always clear if you are in A or B"): A the light
- * blue accent, B orange; ui_trk is the track drawn */
-#define C_TRK_B RGB(255, 150, 40)
+ * blue accent, B orange (C_TRK_B, above); ui_trk is the track drawn */
 static uint32_t ui_trk;
 #define C_TRK (ui_trk ? C_TRK_B : C_AMBER)
 
