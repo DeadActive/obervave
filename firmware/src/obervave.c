@@ -60,8 +60,9 @@ static uint8_t audition[SEQ_CHORD], audition_part;   /* the held step's notes so
 static const char *toast;
 static int is_seq_page(uint32_t pg) { return pg == PG_SEQ; }
 /* the full-screen sequencer's views (SEQ tapped steps through the first three; SAVE tapped there: PATTERNS) */
-enum { SV_STEPS, SV_MORE, SV_TRACK, SV_SOUND, SV_SLOTS, NSV };
-static const char *const SV_NAME[NSV] = {"STEPS", "STEP+", "TRACK", "SOUND", "PATTERNS"};
+enum { SV_TRACKS, SV_STEPS, SV_MORE, SV_TRACK, SV_SLOTS, NSV };   /* TRACKS first: A and B one under the other (SLOOP) */
+static const char *const SV_NAME[NSV] = {"TRACKS", "STEPS", "STEP+", "TRACK", "PATTERNS"};
+#define SV_ENTRY(v) ((v) == SV_STEPS || (v) == SV_MORE)   /* the views where the keys write into the cursor's step */
 static uint32_t seq_view, slot_sel, pat_used, pat_next, arm_k, arm_t, entry_n, pat_edit_t, pend_slot, pat_save_say;
 static uint8_t entry_on_note[128];              /* the keys writing into the cursor step now */
 static uint16_t slot_len[NBLOB][2];             /* the saved patterns' track lengths (the PATTERNS view) */
@@ -815,7 +816,7 @@ static void glo_key(uint32_t k)
  * EDIT tapped clears the step. REC records live as on every page. */
 static int entry_active(void)
 {
-    return is_seq_page(page) && seq_view <= SV_MORE && !rec && !layer && step_held < 0 && pat.trk[seq_trk].len;
+    return is_seq_page(page) && SV_ENTRY(seq_view) && !rec && !layer && step_held < 0 && pat.trk[seq_trk].len;
 }
 
 static void entry_note(uint32_t on, uint32_t note, uint32_t vel)
@@ -957,19 +958,17 @@ static void seq_view_turn(uint32_t knob, int32_t e)
         else if (knob == 3u && e > 0) pat_copy(slot_sel);
         return;
     }
-    if (seq_view == SV_SOUND) {                 /* SOUND (B: = A or its own program), LEVEL, CUTOFF, FX SEND (B's own) */
+    if (seq_view == SV_TRACKS && knob > 0) {    /* LEVEL, CUTOFF of the track's sound; FX SEND (B's own) */
         patch_t *d = t && pat.trk[1].B_PROG ? &live_b : &live;
-        if (knob == 0 && t) b_set((uint32_t)clampi((int32_t)pat.trk[1].B_PROG + e, 0, NPROG));
-        else if (knob == 0) { load_program((uint32_t)clampi((int32_t)prog + e, 0, NPROG - 1)); set.prog = (uint8_t)prog; set_dirty = 1; set_t = fm1_ms; }
-        else if (knob == 1) set_param_in(d, P_VOLUME, d->v[P_VOLUME] + e * 2);
+        if (knob == 1) set_param_in(d, P_VOLUME, d->v[P_VOLUME] + e * 2);
         else if (knob == 2) set_param_in(d, P_CUTOFF, d->v[P_CUTOFF] + e * 2);
         else if (t && pat.trk[1].B_PROG) {
             pat.trk[1].B_DRY = (uint8_t)clampi((int32_t)pat.trk[1].B_DRY - e * 2, 0, 127);
             pat_edited = 1;
-        } else say(t ? "B PLAYS SOUND A: " NM_K1 " = ITS OWN" : "THE EFFECTS ARE A'S");
+        } else say(t ? "B PLAYS SOUND A: " NM_PRESETS " = ITS OWN" : "THE EFFECTS ARE A'S");
         return;
     }
-    if (seq_view == SV_TRACK || (!len && knob == 0)) {   /* LENGTH (A and B share 256 steps; B 0 = off; a track off:
+    if (seq_view == SV_TRACK || seq_view == SV_TRACKS || (!len && knob == 0)) {   /* (TRACKS: KNOB 1 = LENGTH too) */   /* LENGTH (A and B share 256 steps; B 0 = off; a track off:
                                                          * KNOB 1 gives it a length on every view), DIV, SWING, TRANSPOSE */
         if (knob == 0) {
             int32_t l = (int32_t)tk->len;
@@ -1021,8 +1020,8 @@ static void seq_view_turn(uint32_t knob, int32_t e)
 
 static void seq_view_knob(knob_view_t *k, uint32_t i)
 {
-    static const char *const L[NSV][4] = {{"STEP", "NOTE", "GATE", "VELO"}, {"STEP", "RATCHET", "CHANCE", "ON/OFF"},
-                                          {"LENGTH", "DIV", "SWING", "TRANSP"}, {"SOUND", "LEVEL", "CUTOFF", "FX SEND"},
+    static const char *const L[NSV][4] = {{"LENGTH", "LEVEL", "CUTOFF", "FX SEND"}, {"STEP", "NOTE", "GATE", "VELO"},
+                                          {"STEP", "RATCHET", "CHANCE", "ON/OFF"}, {"LENGTH", "DIV", "SWING", "TRANSP"},
                                           {"SLOT", "", "GO", "COPY"}};
     uint32_t t = seq_trk, len = pat.trk[t].len, n;
     seqtrk_t *tk = &pat.trk[t];
@@ -1037,14 +1036,11 @@ static void seq_view_knob(knob_view_t *k, uint32_t i)
         else if (i == 3u) scat(v, copy_arm == slot_sel + 1u && fm1_ms - copy_arm_t <= 3000u ? "AGAIN" : "TURN");
         return;
     }
-    if (seq_view == SV_SOUND) {
+    if (seq_view == SV_TRACKS) {
         uint32_t own = t && pat.trk[1].B_PROG;
         const patch_t *d = own ? &live_b : &live;
-        if (i == 0) {
-            if (t && !own) { scat(v, "= A"); k->v = 0; }
-            else { fmt_u(v, (own ? pat.trk[1].B_PROG - 1u : prog) + 1u); k->v = (int32_t)(own ? pat.trk[1].B_PROG : prog + 1u); }
-            k->max = NPROG;
-        } else if (i == 1) { param_value(v, P_VOLUME, d->v[P_VOLUME]); k->v = d->v[P_VOLUME]; k->max = 127; }
+        if (i == 0) { if (tk->len) fmt_u(v, tk->len); else scat(v, "OFF"); k->v = tk->len; k->max = SEQ_STEPS; }
+        else if (i == 1) { param_value(v, P_VOLUME, d->v[P_VOLUME]); k->v = d->v[P_VOLUME]; k->max = 127; }
         else if (i == 2) { param_value(v, P_CUTOFF, d->v[P_CUTOFF]); k->v = d->v[P_CUTOFF]; k->max = 127; }
         else if (own) { fmt_u(v, ((127u - pat.trk[1].B_DRY) * 100u + 63u) / 127u); scat(v, "%"); k->v = 127 - pat.trk[1].B_DRY; k->max = 127; }
         else { scat(v, t ? "--" : "ALL"); k->v = t ? 0 : 127; k->max = 127; }
@@ -1130,19 +1126,6 @@ static void seq_info_line(char *s, uint16_t *c)
     if (layer == L_SAVE) { scat(s, "WHITE 1-8: GO  BLACK: COPY"); return; }
     if (layer) { scat(s, "LET GO: BACK"); return; }
     *c = C_CREAM;
-    if (seq_view == SV_SOUND) {                 /* the track's sound: number and name */
-        uint32_t own = t && pat.trk[1].B_PROG, n0 = own ? pat.trk[1].B_PROG - 1u : prog;
-        const patch_t *d = own ? &live_b : &live;
-        char nm[PATCH_NAME + 1];
-        if (t && !own) { scat(s, "B PLAYS SOUND A"); *c = C_DIMT; return; }
-        for (k = 0; k < PATCH_NAME; k++) nm[k] = (char)d->v[NPARAM + k];
-        nm[PATCH_NAME] = 0;
-        scat(s, t ? "B: " : "A: ");
-        if (n0 < 9u) scat(s, "0");
-        fmt_u(s + slen(s), n0 + 1u); scat(s, " "); scat(s, nm);
-        if (own ? edited_b : edited) scat(s, "*");
-        return;
-    }
     if (seq_view == SV_TRACK) {
         scat(s, "A "); fmt_u(s + slen(s), pat.trk[0].len);
         scat(s, "  B "); if (pat.trk[1].len) fmt_u(s + slen(s), pat.trk[1].len); else scat(s, "OFF");
@@ -1177,6 +1160,46 @@ static void draw_seq_info(void)
         fmt_u(right, a + 1u); scat(right, "-"); fmt_u(right + slen(right), a + 64u < len ? a + 64u : len);
     }
     ui_seq_info(t, line, c, right[0] ? right : 0, w0, rec == REC_ON || !len ? -1 : (int32_t)(seq_cur[t] % len), seq_playhead());
+}
+
+/* TRACKS: A and B one under the other (as SLOOP's), each with its sound, its length, its 16 steps and the playhead */
+static void draw_seq_tracks(void)
+{
+    static char title[2][28], sub[2][32];
+    uint32_t t, k;
+    for (t = 0; t < 2u; t++) {
+        uint32_t own = t && pat.trk[1].B_PROG, n0 = own ? pat.trk[1].B_PROG - 1u : prog, len = pat.trk[t].len;
+        const patch_t *d = own ? &live_b : &live;
+        int32_t ph = ctl_seq_run && len && !ctl_count ? (int32_t)(ui_seq_pos[t] % len) : -1;
+        uint32_t w0 = ph >= 0 ? (uint32_t)ph / 16u * 16u : seq_pg[t] * 16u;
+        char *ti = title[t], *su = sub[t], nm[PATCH_NAME + 1];
+        uint16_t tc = C_CREAM;
+        for (k = 0; k < PATCH_NAME; k++) nm[k] = (char)d->v[NPARAM + k];
+        nm[PATCH_NAME] = 0;
+        ti[0] = su[0] = 0;
+        if (t && !own) { scat(ti, "= A  "); tc = C_DIMT; }   /* (B plays sound A) */
+        if (n0 < 9u) scat(ti, "0");
+        fmt_u(ti + slen(ti), n0 + 1u); scat(ti, " "); scat(ti, nm);
+        if ((!t && edited) || (own && edited_b)) scat(ti, "*");
+        if (!len) scat(su, t ? "OFF: " NM_K1 " SWITCHES ON" : "OFF");
+        else {
+            fmt_u(su, len); scat(su, " STEPS  "); scat(su, DIV_NAME[pat.trk[t].div % NDIV]);
+            if (pat.trk[t].transp) { scat(su, "  "); fmt_s(su + slen(su), pat.trk[t].transp); }
+        }
+        ui_seq_track_row(t, t == seq_trk, ti, tc, su, pat.trk[t].mute ? "MUTE" : "", w0, ph);
+    }
+}
+static void seq_tracks_line(char *s, uint16_t *c)
+{
+    s[0] = 0;
+    *c = seq_trk ? C_TRK_B : C_AMBER;
+    if (toast && fm1_ms - toast_t < 1500u) { scat(s, toast); return; }
+    *c = C_DIMT;
+#if BOARD_SMK37
+    scat(s, NM_ALGO ": TRACK  " NM_PRESETS ": ITS SOUND");
+#else
+    scat(s, "ALGO: TRACK  PRESETS: SOUND");
+#endif
 }
 
 static void draw_seq_slots(void)
@@ -1349,13 +1372,13 @@ static void app_main(void)
                     if (layer != LL[k] || layer_lock) continue;
                     if (!layer_used && fm1_ms - layer_t < 600u) {   /* a tap: the button's pages */
                         if (LL[k] == L_SEQ) {   /* SEQ: the full-screen sequencer; there, its next view (as SLOOP) */
-                            static const char *const HINT[NSV] = {"KEYS WRITE  " NM_K1 " MOVES", "MORE PER STEP", "THE TRACK: LENGTH ..", "THE TRACK'S SOUND", "THE 8 PATTERNS"};
+                            static const char *const HINT[NSV] = {NM_ALGO ": A / B", "KEYS WRITE  " NM_K1 " MOVES", "MORE PER STEP", "THE TRACK: LENGTH ..", "THE 8 PATTERNS"};
                             if (is_seq_page(page)) seq_view = (seq_view + 1u) % NSV;
-                            else { seq_back = page; np = PG_SEQ; seq_view = SV_STEPS; }
+                            else { seq_back = page; np = PG_SEQ; seq_view = SV_TRACKS; }
                             if (seq_view == SV_SLOTS) slot_sel = pat_queue ? pat_queue - 1u : set.pat;
                             say(HINT[seq_view]);
                             entry_reset();
-                        } else if (LL[k] == L_EDIT && is_seq_page(page) && seq_view <= SV_MORE) seq_clear_cursor();
+                        } else if (LL[k] == L_EDIT && is_seq_page(page) && SV_ENTRY(seq_view)) seq_clear_cursor();
                         else if (LL[k] == L_EDIT) np = cycle_page(PG_OSC1, 5);
                         else if (LL[k] == L_FX) np = cycle_page(PG_CHORUS, 3);
                         else if (LL[k] == L_GLO) np = page == PG_GLOBAL ? PG_VOICE : page == PG_VOICE ? PG_OUTPUT : PG_GLOBAL;
@@ -1472,18 +1495,20 @@ static void app_main(void)
         }
 
         /* encoders */
-        if ((e = fm1_enc_take(ENC_PRESETS)) != 0 && is_seq_page(page)) {   /* in the sequencer: the pattern (as zp12) */
+        if ((e = fm1_enc_take(ENC_PRESETS)) != 0 && is_seq_page(page) && seq_view != SV_TRACKS) {   /* in the sequencer: the pattern (as zp12) */
             uint32_t from = pat_queue ? pat_queue - 1u : set.pat;
             pat_go((uint32_t)clampi((int32_t)from + (e > 0 ? 1 : -1), 0, NPAT - 1));
             dirty_hdr = dirty_page = dirty_steps = 1;
-        } else if (e && seq_trk) {              /* track B chosen: its own sound (from A's program on, the first time) */
-            uint32_t from = pat.trk[1].B_PROG ? pat.trk[1].B_PROG - 1u : prog;
-            b_set((uint32_t)((int32_t)from + e + (int32_t)NPROG * 4) % NPROG + 1u);
-            dirty_hdr = dirty_page = dirty_tags = 1;
+        } else if (e && seq_trk) {              /* track B chosen (as SLOOP): its sound. Down to 0 = it plays A; up from
+                                                 * there, A's program as B's own first */
+            int32_t n1 = pat.trk[1].B_PROG ? (int32_t)pat.trk[1].B_PROG + e : e > 0 ? (int32_t)prog + 1 : 0;
+            b_set((uint32_t)clampi(n1, 0, NPROG));
+            say(pat.trk[1].B_PROG ? "TRACK B: ITS OWN SOUND" : "TRACK B PLAYS SOUND A");
+            dirty_hdr = dirty_page = dirty_tags = dirty_steps = 1;
         } else if (e) {
             load_program((uint32_t)((int32_t)prog + e + (int32_t)NPROG * 4) % NPROG);
             set.prog = (uint8_t)prog; set_dirty = 1; set_t = fm1_ms;
-            dirty_hdr = dirty_page = dirty_tags = 1;
+            dirty_hdr = dirty_page = dirty_tags = dirty_steps = 1;
         }
         if ((e = fm1_enc_take(ENC_ALGORITHM)) != 0) {   /* ALGORITHM: the track (as sloopDX) */
             uint32_t t = e > 0 ? 1u : 0u;
@@ -1706,7 +1731,15 @@ static void app_main(void)
                 t_seq = fm1_ms;
                 if (tk != top_key) { top_key = tk; draw_seq_top(); }
                 if (seq_view == SV_SLOTS && !layer) { if (dirty_steps) draw_seq_slots(); }
-                else {
+                else if (seq_view == SV_TRACKS && !layer && step_held < 0) {
+                    char line[40];
+                    uint16_t c;
+                    uint32_t n, same = 1;
+                    seq_tracks_line(line, &c);
+                    for (n = 0; same && (line[n] || info_prev[n]); n++) same = line[n] == info_prev[n];
+                    if (dirty_steps) draw_seq_tracks();
+                    if (dirty_steps || !same) { n = 0; while ((info_prev[n] = line[n]) != 0) n++; ui_seq_tline(line, c); }
+                } else {
                     char line[40];
                     uint16_t c;
                     uint32_t n, same = 1;

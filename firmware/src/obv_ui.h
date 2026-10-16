@@ -401,6 +401,46 @@ static void ui_seq_knobs(const knob_view_t *k)
     cv_blit(0, 188);
 }
 
+/* TRACKS (as SLOOP's): A and B one under the other, 72 px each from y 24, the chosen one lit in its colour. A row:
+ * the letter in a tile, the sound (number and name), a line under it, the 16 steps of the page that plays (stopped:
+ * the cursor's), the playhead a bar under its step. ui_trk is the row drawn */
+static void ui_seq_track_row(uint32_t t, uint32_t sel, const char *title, uint16_t tc, const char *sub, const char *status,
+                             uint32_t w0, int32_t playhead)
+{
+    uint32_t len = pat.trk[t].len, i;
+    uint16_t c = t ? C_TRK_B : C_AMBER, dim = blend565(C_PANEL, c, 110);
+    char tl[2] = {(char)('A' + t), 0};
+    cv_begin(240, 72, sel ? C_KNOB : C_PANEL);
+    if (sel) cv_rect(0, 0, 3, 72, c);
+    if (sel) { cv_rect(8, 6, 28, 28, c); cv_text(22 - text_w(&FONT_S, tl) / 2, 12, &FONT_S, tl, C_PANEL); }
+    else {
+        cv_rect(8, 6, 28, 1, dim); cv_rect(8, 33, 28, 1, dim); cv_rect(8, 6, 1, 28, dim); cv_rect(35, 6, 1, 28, dim);
+        cv_text(22 - text_w(&FONT_S, tl) / 2, 12, &FONT_S, tl, dim);
+    }
+    cv_text(44, 4, &FONT_S, title, sel ? tc : blend565(C_PANEL, tc, 170));
+    cv_text(44, 21, &FONT_S, sub, C_DIMT);
+    if (status[0]) cv_text(236 - text_w(&FONT_S, status), 4, &FONT_S, status, C_RED);
+    for (i = 0; i < 16u; i++) {
+        uint32_t n = w0 + i;
+        int32_t x = 4 + (int32_t)i * 15 - (i > 7u ? 1 : 0);
+        uint16_t cc;
+        if (n >= len) { cv_rect(x, 42, 13, 16, sel ? C_PANEL : C_KNOB); continue; }
+        if (seq_step(t, n)->note[0] && !(seq_step(t, n)->ratch & STEP_OFF)) cc = sel ? c : dim;
+        else cc = n % 4u ? (sel ? C_PANEL : C_KNOB) : C_KNOB_HI;
+        cv_rect(x, 42, 13, 16, cc);
+        if (playhead >= 0 && n == (uint32_t)playhead) cv_rect(x, 61, 13, 3, C_CREAM);
+    }
+    cv_rect(0, 71, 240, 1, C_RULE);
+    cv_blit(0, 24 + (int32_t)t * 72);
+}
+
+static void ui_seq_tline(const char *l, uint16_t c)   /* TRACKS: the line under the two rows */
+{
+    cv_begin(240, 20, C_PANEL);
+    cv_text((240 - text_w(&FONT_S, l)) / 2, 2, &FONT_S, l, c);
+    cv_blit(0, 168);
+}
+
 /* PATTERNS: the eight slots as two columns of four (selected: framed in red; the one playing: a blue bar) */
 static void ui_seq_slots(const char *const *txt, uint32_t used, uint32_t sel, uint32_t now, uint32_t now_edited)
 {

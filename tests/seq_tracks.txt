@@ -1,5 +1,6 @@
 # track A blue, track B orange: the same screen for both
 3000 btn 11
+3100 btn 11
 3200 keys 0x80
 3400 keys 0
 3600 keys 0x800

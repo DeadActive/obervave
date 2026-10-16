@@ -63,7 +63,10 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   B's voices render into `bus_b`: its send joins A before the output stage and the effects, the rest gets its own
   output stage after them. Arp and effects stay A's (`is_a_only`). The panel is on B's sound when track B is chosen
   and has one (`ed_b()`, `ed_patch(p)`): keys (`play_note`, a note's part kept for its release), pages, PRESETS,
-  SAVE x2, randomize; the header in B's orange. SOUND view (SEQ view 4): program (`= A`), LEVEL, CUTOFF, FX SEND.
+  SAVE x2, randomize; the header in B's orange. **TRACKS view** (SEQ view 0, the user 2026-10-16: "wie bei sloop,
+  die Spuren untereinander"): A and B rows stacked (`ui_seq_track_row`: tile, sound, length, 16 steps, playhead),
+  ALGORITHM picks the row, PRESETS = the row's sound (B: 0 `= A`, up = A's program as B's own first), knobs LENGTH
+  LEVEL CUTOFF FX SEND; PRESETS stays the pattern on the other views. Then STEPS, STEP+, TRACK, PATTERNS.
   MIDI: with a channel set, channel + 1 = B's sound (notes, CC, program change). Cost on the host: one sound +4 %
   (~1010 instr/sample on seq_view.txt, was 970). Host scripts: tests/seq_two_sounds.txt, seq_two_patterns.txt.
   The click (set.click, the old pad byte: OFF / REC / ON / COUNT-IN, GLOBAL page KNOB 2; the CPU time moved to that

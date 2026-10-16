@@ -1,6 +1,7 @@
 # the sequencer's patterns as zp12's loops: PRESETS picks, playing from the end of track A's loop; SAVE saves now;
 # SAVE held + a black key copies
 3000 btn 11
+3100 btn 11
 3200 keys 0x80
 3400 keys 0
 3600 btn 9

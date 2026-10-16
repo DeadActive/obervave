@@ -84,30 +84,32 @@ SWING and TRANSPOSE (16 steps against 12 makes a polymeter). **Track B starts sw
 SEQ tapped, **ALGORITHM** (the badge on top turns to B, orange), turn **KNOB 1**: B gets 16 steps; then play notes
 into it or REC on top of A. GLO held + key 1 / 2 mutes A / B, + key 5 / 6 solos it.
 
-Track B plays track A's sound until you give it **its own**: the SOUND view (SEQ tapped until it shows), track B,
-KNOB 1 from `= A` to a program; or, track B chosen, turn **PRESETS** outside the sequencer. The pattern keeps which
+**TRACKS** (as SLOOP's, the first view when SEQ is tapped) shows A and B one under the other: each with its sound,
+its length and its 16 steps with the playhead. **ALGORITHM** picks the track (its row lights up), **PRESETS** picks
+the track's sound. Track B plays track A's sound (`= A`) until you turn PRESETS up: it starts with A's program as its
+own, then any of the 32 (outside the sequencer PRESETS does the same while track B is chosen). The pattern keeps which
 program B plays, and a pattern switched in brings its B sound along. Both sounds share the eight voices (a MONO or
 UNISON sound keeps four of them for itself).
 
 - With track B chosen and its own sound, **the panel is on B's sound**: the program number and name turn orange
   with a B, the keys play it, every page edits it, PRESETS picks it, SAVE twice saves it into its program. ALGORITHM
   back to A and the panel is on sound A again.
-- The **arpeggiator and the effects are sound A's**. B goes into them by its **FX SEND** (the SOUND view, KNOB 4:
+- The **arpeggiator and the effects are sound A's**. B goes into them by its **FX SEND** (TRACKS, KNOB 4:
   100 % = all of it, as A; less, and the rest passes them by, dry: a bass under a big reverb stays tight).
 
 | View | KNOB 1 | KNOB 2 | KNOB 3 | KNOB 4 |
 | --- | --- | --- | --- | --- |
+| **TRACKS** (PRESETS: the track's sound) | LENGTH | LEVEL | CUTOFF | FX SEND (B's own sound) |
 | **STEPS** | the step cursor | NOTE (the chord moves) | GATE (to TIE) | VELOCITY |
 | **STEP+** | the step cursor | RATCHET 1-4 | CHANCE | the step ON / OFF |
 | **TRACK** | LENGTH (fast: by 16; A and B share 256) | DIV | SWING | TRANSPOSE |
-| **SOUND** | the track's program (B: `= A` or its own) | LEVEL | CUTOFF | FX SEND (B's own sound) |
 | **PATTERNS** | the slot | - | GO there | COPY this one there (twice on a used one) |
 
 - **Step entry** (STEPS, STEP+): a key or a chord goes into the cursor's step, and the cursor moves on when you let
   go; a key held and KNOB 1 turned on makes a long note. **EDIT tapped** clears the step (a rest). MIDI notes write
   too. **REC** records live, on every page.
 - **ALGORITHM** picks track A or B. A track that is off (B at first) gets 16 steps from KNOB 1 on any view.
-- **PRESETS** picks the pattern (1-8): stopped at once, playing from the end of track A's loop (the top line shows
+- **PRESETS** picks the pattern (1-8) on every view but TRACKS: stopped at once, playing from the end of track A's loop (the top line shows
   `PAT 1>2` until then). In the sequencer PRESETS is the pattern; HOME's pages keep it for the program.
 - **Saving:** SAVE tapped saves now (playing: at the stop). A pattern also saves itself 3 s after a change once the
   sequencer stands (the `*` after `PAT 1` goes). One left with changes while playing is saved at the stop.
