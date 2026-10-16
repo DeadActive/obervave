@@ -121,7 +121,7 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 ## Status (2026-10-13, third session)
 
-Released: **1.4** (2026-10-16, FM-1_954, tag v1.4: two sounds, track B's own program; the TRACKS view; tried on the
+Released: **1.4.1** (2026-10-16, FM-1_954, tag v1.4.1: each sound its own arp; SMK-37 1.4.1-beta) after **1.4** (tag v1.4: two sounds, track B's own program; the TRACKS view; tried on the
 user's FM-1 first) and **SMK-37 1.4-beta** (docs/firmware/smk37, tag smk37-v1.4-beta, not yet on a real SMK-37).
 Before: **1.3.1** (FM-1_953, tag v1.3.1: the tracks coloured, A blue / B orange) after **1.3** (tag v1.3: the full-screen sequencer as SLOOP's step page, patterns as
 zp12's loops); SMK-37 1.3.1-beta was tested on a real SMK-37 on 16.10.2026: works.

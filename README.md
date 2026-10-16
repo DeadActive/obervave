@@ -11,8 +11,9 @@ three effects after the voices. No second engine: one synth, as far as the chip 
 
 <p align="center"><img src="docs/screen.png" width="240" alt="OberVave's screen: program 01 DARK ARP, the ARP page with four knobs, the scope, eight voice LEDs"></p>
 
-> **Status: 1.4, runs on the FM-1.** Install it from [thefirmwarehub.com](https://thefirmwarehub.com) or with
-> `tools/fm1_install.py docs/firmware/obervave-1.4.fwsc` (identity `FM-1_954`). 1.4 gives track B a sound of its own
+> **Status: 1.4.1, runs on the FM-1.** Install it from [thefirmwarehub.com](https://thefirmwarehub.com) or with
+> `tools/fm1_install.py docs/firmware/obervave-1.4.1.fwsc` (identity `FM-1_954`). 1.4.1 gives each sound its own
+> arpeggiator (in 1.4 track B's sound did not arpeggiate). 1.4 gave track B a sound of its own
 > (two sounds on the eight voices, see [the sequencer](#the-sequencer)) and opens the sequencer on TRACKS, A and B one
 > under the other as in SLOOP. 1.3.1 coloured the sequencer by track (A blue, B orange). 1.3 gave the sequencer the whole
 > screen and works it as SLOOP's step page (KNOB 1 moves the step cursor, the keys write into it), and switches and
