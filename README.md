@@ -11,8 +11,10 @@ three effects after the voices. No second engine: one synth, as far as the chip 
 
 <p align="center"><img src="docs/screen.png" width="240" alt="OberVave's screen: program 01 DARK ARP, the ARP page with four knobs, the scope, eight voice LEDs"></p>
 
-> **Status: 1.4.2, runs on the FM-1.** Install it from [thefirmwarehub.com](https://thefirmwarehub.com) or with
-> `tools/fm1_install.py docs/firmware/obervave-1.4.2.fwsc` (identity `FM-1_954`). 1.4.2 keeps the notes in time while
+> **Status: 1.4.3, runs on the FM-1.** Install it from [thefirmwarehub.com](https://thefirmwarehub.com) or with
+> `tools/fm1_install.py docs/firmware/obervave-1.4.3.fwsc` (identity `FM-1_954`). 1.4.3 gives each sound its own HOLD:
+> the arp of track A and of track B latch on their own (one's HOLD held the other's notes, one's HOLD off stopped both).
+> 1.4.2 kept the notes in time while
 > the screen redraws (they stumbled under CC streams and live tweaking; chords on the SMK-37 came in staggered).
 > 1.4.1 gave each sound its own
 > arpeggiator (in 1.4 track B's sound did not arpeggiate). 1.4 gave track B a sound of its own

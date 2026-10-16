@@ -62,7 +62,7 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   take cards 0-3 (A) / 4-7 (B) when B has its own sound, POLY shares the 8 unless the other sound is a group.
   B's voices render into `bus_b`: its send joins A before the output stage and the effects, the rest gets its own
   output stage after them. The effects stay A's (`is_a_only`); **each sound has its own arp** (the user 2026-10-16: "der Arpeggio geht nur auf
-  einer Spur"): `held[2][]`, `nheld[2]`, `arp[2]`, `arp_tick(p)`, arp_q carries the part; pedal / HOLD hold both. The panel is on B's sound when track B is chosen
+  einer Spur"): `held[2][]`, `nheld[2]`, `arp[2]`, `arp_tick(p)`, arp_q carries the part; the pedal holds both, HOLD is per sound (`hold` / `ctl_hold` bit p, ARP on its page toggles the panel's sound's; tests/seq_two_holds.txt). The panel is on B's sound when track B is chosen
   and has one (`ed_b()`, `ed_patch(p)`): keys (`play_note`, a note's part kept for its release), pages, PRESETS,
   SAVE x2, randomize; the header in B's orange. **TRACKS view** (SEQ view 0, the user 2026-10-16: "wie bei sloop,
   die Spuren untereinander"): A and B rows stacked (`ui_seq_track_row`: tile, sound, length, 16 steps, playhead),
@@ -127,7 +127,7 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 ## Status (2026-10-13, third session)
 
-Released: **1.4.2** (2026-10-16, FM-1_954, tag v1.4.2: keys and MIDI read while the screen draws; SMK-37 1.4.2-beta; released at the user's word without a device test) after **1.4.1** (tag v1.4.1: each sound its own arp) after **1.4** (tag v1.4: two sounds, track B's own program; the TRACKS view; tried on the
+Released: **1.4.3** (2026-10-16, FM-1_954, tag v1.4.3: HOLD per sound, `ctl_hold` bit p; SMK-37 1.4.3-beta; installed on the user's FM-1, released at the user's word) after **1.4.2** (tag v1.4.2: keys and MIDI read while the screen draws; released without a device test) after **1.4.1** (tag v1.4.1: each sound its own arp) after **1.4** (tag v1.4: two sounds, track B's own program; the TRACKS view; tried on the
 user's FM-1 first) and **SMK-37 1.4-beta** (docs/firmware/smk37, tag smk37-v1.4-beta, not yet on a real SMK-37).
 Before: **1.3.1** (FM-1_953, tag v1.3.1: the tracks coloured, A blue / B orange) after **1.3** (tag v1.3: the full-screen sequencer as SLOOP's step page, patterns as
 zp12's loops); SMK-37 1.3.1-beta was tested on a real SMK-37 on 16.10.2026: works.
