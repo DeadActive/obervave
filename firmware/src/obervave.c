@@ -43,7 +43,7 @@ static struct {
 } set;
 static uint32_t set_dirty, set_t;
 
-static uint32_t prog, edited, page = PG_PERFORM, hold, save_armed, save_t;
+static uint32_t prog, edited, page = PG_PERFORM, hold, save_armed, save_t;   /* hold: bit p = sound p's HOLD */
 static uint32_t edited_b, b_loaded;             /* track B's own sound: edited; the B_PROG whose sound is in live_b */
 
 /* the sequencer, as the panel sees it */
@@ -162,7 +162,7 @@ static void b_load(void)                        /* live_b as the pattern says (a
     if (pat.trk[1].B_PROG > NPROG) pat.trk[1].B_PROG = 0;
     b_loaded = pat.trk[1].B_PROG;
     edited_b = 0;
-    if (!b_loaded) return;
+    if (!b_loaded) { hold &= ~2u; ctl_hold = hold; return; }   /* (no own sound: no own HOLD) */
     prog_get(b_loaded - 1u, &p);
     live_b = p;
 }
@@ -172,6 +172,7 @@ static void b_set(uint32_t n1)                  /* track B: program n1 - 1, or 0
     if (n1 > NPROG) n1 = 0;
     if (n1 == pat.trk[1].B_PROG) return;
     if (n1) { patch_t p; prog_get(n1 - 1u, &p); live_b = p; }   /* (the sound first, then the pattern names it) */
+    else { hold &= ~2u; ctl_hold = hold; }
     pat.trk[1].B_PROG = (uint8_t)n1;
     b_loaded = n1;
     edited_b = 0;
@@ -438,7 +439,7 @@ static void draw_header(void)
         const uint8_t *pv = ed_patch(0)->v;     /* (the mode and filter of the sound the panel is on) */
         uint32_t arp = pv[P_ARP_MODE] != 0, fx = live.v[P_CHO_MIX] || live.v[P_DLY_MIX] || live.v[P_REV_MIX], trk = seq_trk;
         uint32_t n = slen(MODE_S[pv[P_MODE] & 3u]) + 1u + slen(FT_S[pv[P_FTYPE] % NFTYPE])
-                   + (hold ? 5u : 0u) + (ctl_seq_run ? 4u : 0u) + (rec ? 4u : 0u);
+                   + ((hold >> ed_b() & 1u) ? 5u : 0u) + (ctl_seq_run ? 4u : 0u) + (rec ? 4u : 0u);
         if (trk && n + 2u <= 23u) n += 2u; else trk = 0;
         if (arp && n + 4u <= 23u) n += 4u; else arp = 0;
         if (fx && n + 3u <= 23u) n += 3u; else fx = 0;
@@ -447,7 +448,7 @@ static void draw_header(void)
         scat(tags, FT_S[pv[P_FTYPE] % NFTYPE]);
         if (arp) scat(tags, " ARP");
         if (fx) scat(tags, " FX");
-        if (hold) scat(tags, " HOLD");
+        if (hold >> ed_b() & 1u) scat(tags, " HOLD");
         if (trk) scat(tags, " B");
         if (ctl_seq_run) scat(tags, " SEQ");
         if (rec) scat(tags, " REC");
@@ -1548,7 +1549,7 @@ static void app_main(void)
         if (b & (1u << BTN_ENV)) np = cycle_page(PG_FENV, 2);
         if (b & (1u << BTN_LFO)) np = cycle_page(PG_LFO, 3);
         if (b & (1u << BTN_ARP)) {
-            if (page == PG_ARP) { hold = !hold; ctl_hold = hold; dirty_tags = 1; }   /* on its page: HOLD (latch) */
+            if (page == PG_ARP) { hold ^= 1u << ed_b(); ctl_hold = hold; dirty_tags = 1; }   /* on its page: the panel's sound's HOLD */
             else np = PG_ARP;
         }
         if (b & (1u << BTN_PLAY)) {             /* start from step 1 / stop (a take ends with it) */

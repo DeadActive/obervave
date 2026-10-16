@@ -58,7 +58,7 @@ static void note_event(uint32_t on, uint32_t note, uint32_t vel) { note_event_p(
 
 /* the controllers (main loop writes) */
 static volatile int32_t ctl_bend;               /* -8192..8191 */
-static volatile uint32_t ctl_sustain, ctl_hold, ctl_cc7 = 127;
+static volatile uint32_t ctl_sustain, ctl_hold, ctl_cc7 = 127;   /* ctl_hold: bit p = sound p's HOLD */
 #if BOARD_SMK37
 static volatile int32_t ctl_vib;                /* the SMK-37's mod wheel 0..127: a vibrato from the LFO, up to +-1/2 semitone */
 #endif
@@ -355,11 +355,12 @@ static void arp_tick(uint32_t p)
     }
 }
 
-/* ---- note events (ISR), per sound: its held keys, its arp; the pedal and HOLD hold both */
-static uint32_t sus_was;
+/* ---- note events (ISR), per sound: its held keys, its arp, its HOLD; the pedal holds both */
+static uint32_t sus_was;                        /* bit p: sound p was held */
+static inline uint32_t part_sus(uint32_t p) { return ctl_sustain || (ctl_hold >> p & 1u); }
 static void ev_note_on(uint32_t p, uint32_t note, uint32_t vel)
 {
-    uint32_t i, arp_on = pt[p].p->v[P_ARP_MODE] != A_OFF, sus = ctl_sustain || ctl_hold;
+    uint32_t i, arp_on = pt[p].p->v[P_ARP_MODE] != A_OFF, sus = part_sus(p);
     if (arp_on && sus) {                        /* latch: a new chord after all keys were up starts over */
         for (i = 0; i < nheld[p]; i++)
             if (held[p][i].phys) break;
@@ -383,22 +384,22 @@ static void ev_note_off(uint32_t p, uint32_t note)
     uint32_t i;
     for (i = 0; i < nheld[p]; i++)
         if (held[p][i].note == note) held[p][i].phys = 0;
-    if (ctl_sustain || ctl_hold) return;        /* the pedal / HOLD keeps it */
+    if (part_sus(p)) return;                    /* the pedal / its HOLD keeps it */
     held_remove(p, note);
     if (pt[p].p->v[P_ARP_MODE] != A_OFF) return;
     voice_release(p, note, 0);
 }
 
-static void ev_sustain_up(void)                 /* the pedal / HOLD let go: what no key holds is released */
+static void ev_sustain_up(uint32_t p)           /* the pedal / its HOLD let go: what no key holds is released */
 {
-    uint32_t p, i, j;
-    for (p = 0; p < 2u; p++) {
+    uint32_t i, j;
+    {
         uint8_t gone[NHELD], ng = 0;
         for (i = j = 0; i < nheld[p]; i++)
             if (held[p][i].phys) held[p][j++] = held[p][i];
             else gone[ng++] = held[p][i].note;
         nheld[p] = j;
-        if (pt[p].p->v[P_ARP_MODE] != A_OFF) continue;
+        if (pt[p].p->v[P_ARP_MODE] != A_OFF) return;
         for (i = 0; i < ng; i++) voice_release(p, gone[i], 0);
     }
 }
@@ -413,9 +414,10 @@ static void parts_off(uint32_t p)               /* a sound gone (B back on A, a 
 
 static void engine_events(void)
 {
-    uint32_t sus = ctl_sustain || ctl_hold;
+    uint32_t sus = part_sus(0) | part_sus(1) << 1;
     if (ctl_panic) { ctl_panic = 0; parts_off(0); parts_off(1); voices_release_all(); }
-    if (!sus && sus_was) ev_sustain_up();
+    if (sus_was & ~sus & 1u) ev_sustain_up(0);  /* each sound on its own: A's HOLD off never touches B */
+    if (sus_was & ~sus & 2u) ev_sustain_up(1);
     sus_was = sus;
     while (nq_r != nq_w) {
         nev_t e = nq[nq_r % NQ];
