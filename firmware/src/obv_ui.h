@@ -175,8 +175,10 @@ static void ui_page(const char *title, const knob_view_t *k, const char *note)
     cv_text((240 - tw) / 2, 1, &FONT_S, title, C_AMBER);
     cv_rect((240 + tw) / 2 + 8, 9, (240 - tw) / 2 - 14, 1, C_RULE);
     for (i = 0; i < 4; i++)
-        if (k[i].present)
+        if (k[i].present) {
             cv_knob(30 + 60 * i, 62, k[i].label, k[i].value, k[i].v, k[i].max, k[i].bip);
+            app_idle();                         /* (a knob is ~1 ms: the keys and MIDI in between) */
+        }
     if (note)
         cv_text(240 - 4 - text_w(&FONT_S, note), 1, &FONT_S, note, C_RED);
     cv_blit(0, 46);

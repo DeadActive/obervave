@@ -23,6 +23,10 @@ static void lcd_sync(void)          /* finish the running transfer (before touch
 {
     if (!lcd_busy)
         return;
+#ifdef LCD_IDLE
+    while (!fm1_lcd_done())
+        LCD_IDLE();                /* the app's own work while the strip goes out (OberVave: the keys, MIDI) */
+#endif
     fm1_lcd_wait();
     fm1_lcd_deselect();
     lcd_busy = 0;

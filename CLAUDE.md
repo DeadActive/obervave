@@ -81,6 +81,12 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   device). Host cost (instr/sample): chorus ~160, delay ~110, reverb ~550; worst case with all three ~2350.
   **The user's priority is maximum sound quality over CPU**: measure on the device before trading any of it.
 - Filter type SEM (`F_SEM`): the 12 dB SVF's LP .. notch .. HP by MORPH (FILTER + page, knob 4), as the SEM's pot.
+- Input during drawing (2026-10-16, a video "THIS FIRMWARE NEEDS A FIX": notes stumbled under CC streams, chords on
+  the SMK-37 came in staggered): the keys and MIDI are `keys_in` / `midi_in` (obervave.c); the main loop calls them
+  once a pass, and `app_idle` (notes, CC, clock only; a program change waits in `midi_back`) runs them while lcd.c
+  waits for a strip's DMA (`LCD_IDLE`, `fm1_lcd_done` in hal) and between ui_page's knobs, only while `idle_ok`
+  (the screen section). A note redraws the page only where it shows (`notes_shown`: SEQ, REC). The host can't show
+  it (its screen takes no time): sound and screens there are bit-identical to before.
 - `tools/gen_tables.py` -> `firmware/gen/obv_tables.h` (committed): pitch, SVF g, tanh, envelope / LFO / glide
   coefficients, pan, cos.
 - The logo: `tools/make_logo.py` -> `assets/logo*.svg|png` (red glowing serif outlines, three blue bands through the

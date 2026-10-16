@@ -138,7 +138,7 @@ static void smk_pads(uint32_t base, uint32_t *dirty)
                 if (notes_down) notes_down--;
             }
         }
-        *dirty = 1;
+        if (notes_shown()) *dirty = 1;          /* (a note alone changes no knob page) */
     }
     v = SMK_PAD_HELD;                           /* the step view comes and goes with a held pad */
     if (v != smk_view_prev) { smk_view_prev = v; *dirty = 1; hints_key = 0xFFFFFFFFu; }
