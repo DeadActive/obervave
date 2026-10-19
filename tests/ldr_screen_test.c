@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 illuminus5 (Skiff's test), zvenson (OberVave) */
-/* Host test of the update loader screen (Skiff's) (firmware/loader/ldr_screen.c) through src/lcd.c, on a fake ST7789: the
- * window and RAMWR commands into a 240 x 240 frame. UPDATE MODE after boot, WRITING with the bar at 50 %, a second
- * write starting the bar over, UPDATE FAILED; every letter of their texts in the loader's font, nothing drawn outside
- * the panel. With a DIR, the three screens as PPM files.   tests/ldr_screen_test [DIR] */
+/* Host test of the update loader's screen (firmware/loader/ldr_screen.c) through src/lcd.c, on a fake ST7789: the
+ * window and RAMWR commands into a 240 x 240 frame. UPDATE MODE after boot with the name, the 20 segments and the
+ * hub's address, the waiting light running to and fro, WRITING at 50 % (10 segments, "50%"), a second write starting
+ * over, UPDATE FAILED; every letter in the loader's font, only the screen's colours, nothing outside the panel.
+ * With a DIR, the screens as PPM files.   tests/ldr_screen_test [DIR] */
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -84,30 +85,73 @@ static void ppm(const char *dir, const char *name)
     fclose(f);
 }
 
+static uint32_t lit_segs(uint16_t c)                 /* segments in colour c (their middle pixel) */
+{
+    uint32_t i, n = 0;
+    for (i = 0; i < LDR_SEGS; i++)
+        n += fb[LDR_SEG_Y + LDR_SEG_H / 2u][LDR_SEG_X + i * (LDR_SEG_W + 2u) + LDR_SEG_W / 2u] == c;
+    return n;
+}
+static uint32_t lit_at(void)                         /* the one lit segment, or 99 */
+{
+    uint32_t i;
+    for (i = 0; i < LDR_SEGS; i++)
+        if (fb[LDR_SEG_Y + 5u][LDR_SEG_X + i * (LDR_SEG_W + 2u) + 4u] == LDR_COLOUR)
+            return i;
+    return 99u;
+}
+static int palette_only(void)
+{
+    uint32_t x, y;
+    for (y = 0; y < 240u; y++)
+        for (x = 0; x < 240u; x++) {
+            uint16_t c = fb[y][x];
+            if (c != LDR_BG && c != LDR_INK && c != LDR_SUB && c != LDR_DIM && c != LDR_HUB && c != LDR_COLOUR && c != LDR_TAIL)
+                return 0;
+        }
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     const char *dir = argc > 1 ? argv[1] : NULL;
-    uint32_t total = 0x93000u - 0x4000u;          /* the app area, as ldr_core.c reports it */
+    uint32_t total = 0x93000u - 0x4000u, ms, seen = 0, i, back = 0, last = 0;   /* the app area, as ldr_core.c reports it */
     ldr_screen();
     ppm(dir, "ldr_update_mode");
-    check("UPDATE MODE: the title in OberVave's blue, three lines in white, nothing else lit",
-          count(0, 70, 240, 91, LDR_TITLE) > 300u && count(0, 110, 240, 164, LDR_INK) > 900u &&
-          count(0, 0, 240, 240, 0) + count(0, 0, 240, 240, LDR_TITLE) + count(0, 0, 240, 240, LDR_INK) == 240u * 240u);
+    check("UPDATE MODE: the name in its colour, the status, the hub's address in lila, 20 segments off",
+          count(0, 20, 240, 76, LDR_COLOUR) > 300u && count(0, 92, 240, 112, LDR_INK) > 200u &&
+          count(0, 220, 240, 230, LDR_HUB) > 80u && lit_segs(LDR_DIM) == LDR_SEGS);
+    check("only the screen's colours, the background the hub's", palette_only() && count(0, 0, 240, 10, LDR_BG) == 2400u);
+    for (ms = 0; ms < 60u * 60u; ms += 60u) {        /* an hour of steps: the light goes to and fro, one segment lit */
+        ldr_anim(ms);
+        i = lit_at();
+        if (i == 99u || lit_segs(LDR_COLOUR) != 1u)
+            break;
+        seen |= 1u << i;
+        back += i < last;
+        last = i;
+        if (ms == 600u)
+            ppm(dir, "ldr_waiting");
+    }
+    check("the waiting light: always one segment, every one reached, there and back again",
+          ms >= 3600u && seen == (1u << LDR_SEGS) - 1u && back > 0u);
+    check("its afterglow: one segment halfway, next to the light", lit_segs(LDR_TAIL) == 1u);
     ldr_bar(total / 2u, total);
     ppm(dir, "ldr_writing");
-    check("WRITING at 50 %: the bar's first 100 px blue, the rest its track",
-          count(LDR_BAR_X, LDR_BAR_Y, LDR_BAR_X + 100u, LDR_BAR_Y + 8u, LDR_BAR) == 800u &&
-          count(LDR_BAR_X + 100u, LDR_BAR_Y, LDR_BAR_X + 200u, LDR_BAR_Y + 8u, LDR_DIM) == 800u);
+    check("WRITING at 50 %: 10 segments lit, the rest off, \"50%\" under them, the light stopped",
+          lit_segs(LDR_COLOUR) == 10u && lit_segs(LDR_DIM) == 10u && count(0, 170, 240, 192, LDR_INK) > 100u && !ldr_idle);
+    ldr_anim(99999u);
+    check("no waiting light once it writes", lit_segs(LDR_COLOUR) == 10u);
     ldr_bar(total, total);
+    check("done: all 20 lit", lit_segs(LDR_COLOUR) == LDR_SEGS);
     ldr_bar(total / 4u, total);
-    check("a second write starts the bar over (25 %)",
-          count(LDR_BAR_X, LDR_BAR_Y, LDR_BAR_X + 200u, LDR_BAR_Y + 8u, LDR_BAR) == 50u * 8u);
+    check("a second write starts over (25 %: 5 segments)", lit_segs(LDR_COLOUR) == 5u);
     ldr_failed();
     ppm(dir, "ldr_failed");
-    check("UPDATE FAILED: the bar gone, the way out again",
-          count(LDR_BAR_X, LDR_BAR_Y, LDR_BAR_X + 200u, LDR_BAR_Y + 8u, 0) == 1600u &&
-          count(0, 110, 240, 164, LDR_INK) > 900u);
-    check("every letter of the texts in the loader's font, nothing outside the panel", !ldr_missing && !outside);
+    check("UPDATE FAILED: the segments off, no percent, the way out",
+          lit_segs(LDR_DIM) == LDR_SEGS && count(0, 170, 240, 192, LDR_INK) == 0u && count(0, 92, 240, 112, LDR_INK) > 200u);
+    check("every letter in the loader's font, nothing outside the panel, only the screen's colours",
+          !ldr_missing && !outside && palette_only());
     printf("%s\n", bad ? "LDR SCREEN TEST FAILED" : "ldr_screen test passed");
     return bad != 0;
 }

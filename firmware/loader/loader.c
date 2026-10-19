@@ -34,7 +34,7 @@
 #include "fm1_flash.h"
 #include "../src/libc.c"
 #include "../src/usb.c"
-#if !BOARD_SMK37                                /* the screen: UPDATE MODE, WRITING (ldr_screen.c, from Skiff) */
+#if !BOARD_SMK37                                /* the screen: UPDATE MODE, WRITING (ldr_screen.c, the hub's look) */
 #define fm1_irq_off() ((void)0)                 /* (lcd.c's, around port A: interrupts are off for the whole loader) */
 #define fm1_irq_on() ((void)0)
 #include "fm1_lcd_hw.h"
@@ -44,6 +44,7 @@
 static void ldr_screen(void) {}
 static void ldr_bar(uint32_t done, uint32_t total) { (void)done; (void)total; }
 static void ldr_failed(void) {}
+static void ldr_anim(uint32_t ms) { (void)ms; }
 #endif
 
 static uint32_t ldr_ms(void)   /* monotonic ms; survives the TIMER4 wrap (178.9 s) */
@@ -115,6 +116,7 @@ void ldr_main(void)
     for (;;) {
         ldr_poll();
         usb_retry(ldr_ms());
+        ldr_anim(ldr_ms());                         /* the waiting light (ldr_screen.c) */
         if (usb.uboot_req) {                        /* soft key: mask-ROM UBOOT, as in Felucca */
             usb_detach();
             fm1_delay_ms(30);
