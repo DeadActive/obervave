@@ -11,8 +11,8 @@ three effects after the voices. No second engine: one synth, as far as the chip 
 
 <p align="center"><img src="docs/screen.png" width="240" alt="OberVave's screen: program 01 DARK ARP, the ARP page with four knobs, the scope, eight voice LEDs"></p>
 
-> **Status: 1.5.1, runs on the FM-1.** Install it from [thefirmwarehub.com](https://thefirmwarehub.com) or with
-> `tools/fm1_install.py docs/firmware/obervave-1.5.1.fwsc` (identity `FM-1_955`). 1.5.1 opens the FM-1's **TRS MIDI IN**
+> **Status: 1.5.2, runs on the FM-1.** Install it from [thefirmwarehub.com](https://thefirmwarehub.com) or with
+> `tools/fm1_install.py docs/firmware/obervave-1.5.2.fwsc` (identity `FM-1_955`). 1.5.2 opens the FM-1's **TRS MIDI IN**
 > jack: a keyboard, a drum machine or a sequencer through a TRS-to-DIN adapter plays OberVave (notes, CC, program
 > change, clock, start / stop; if nothing plays, try the other adapter type, A or B). Before, only USB-MIDI reached it.
 > The keys now send their notes on the MIDI channel set on the GLOBAL page (they always went out on channel 1).

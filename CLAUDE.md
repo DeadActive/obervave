@@ -127,10 +127,10 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 ## Status (2026-10-13, third session)
 
-Released: **1.5.1** (2026-10-19, FM-1_955, tag v1.5.1: the TRS MIDI IN on (FELUCCA_UART on the FM-1 board, sloopDX's
+Released: **1.5.2** (2026-10-19, FM-1_955, tag v1.5.2 (v1.5.1 = 1.5 rebuilt by the CI): the TRS MIDI IN on (FELUCCA_UART on the FM-1 board, sloopDX's
 midi_uart.c polled at 2 kHz in TIMER5; users said MIDI from external gear did not work), the keys send on the set
 channel (`MIDI_OUT_CH`); installed on the user's FM-1, USB-MIDI and a second update fine, the jack itself not tried here;
-SMK-37 1.5.1-beta) after **1.5** (2026-10-16, FM-1_955, tag v1.5: 99 programs, 64 factory (33-64 new), 65-99 INIT; save as: SAVE, PRESETS = the slot, SAVE; the programs in 2 own flash sectors `psect` (FM-1 0x97000, SMK 0xA6000, 50 a sector), the settings sector only globals now (SET_VERSION 3, a v2 store's 32 programs move over at boot); SMK-37 1.5-beta; installed on the user's FM-1 and boots) after **1.4.3** (tag v1.4.3: HOLD per sound, `ctl_hold` bit p) after **1.4.2** (tag v1.4.2: keys and MIDI read while the screen draws; released without a device test) after **1.4.1** (tag v1.4.1: each sound its own arp) after **1.4** (tag v1.4: two sounds, track B's own program; the TRACKS view; tried on the
+SMK-37 1.5.2-beta) after **1.5** (2026-10-16, FM-1_955, tag v1.5: 99 programs, 64 factory (33-64 new), 65-99 INIT; save as: SAVE, PRESETS = the slot, SAVE; the programs in 2 own flash sectors `psect` (FM-1 0x97000, SMK 0xA6000, 50 a sector), the settings sector only globals now (SET_VERSION 3, a v2 store's 32 programs move over at boot); SMK-37 1.5-beta; installed on the user's FM-1 and boots) after **1.4.3** (tag v1.4.3: HOLD per sound, `ctl_hold` bit p) after **1.4.2** (tag v1.4.2: keys and MIDI read while the screen draws; released without a device test) after **1.4.1** (tag v1.4.1: each sound its own arp) after **1.4** (tag v1.4: two sounds, track B's own program; the TRACKS view; tried on the
 user's FM-1 first) and **SMK-37 1.4-beta** (docs/firmware/smk37, tag smk37-v1.4-beta, not yet on a real SMK-37).
 Before: **1.3.1** (FM-1_953, tag v1.3.1: the tracks coloured, A blue / B orange) after **1.3** (tag v1.3: the full-screen sequencer as SLOOP's step page, patterns as
 zp12's loops); SMK-37 1.3.1-beta was tested on a real SMK-37 on 16.10.2026: works.
