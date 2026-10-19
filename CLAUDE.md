@@ -102,7 +102,7 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
   instructions per sample (Linux perf counter): the yardstick is sloopDX's engines at ~1000-1500; OberVave's worst
   case (8 voices, LP24, sync + x-mod, saw+pulse, drive) is ~1900, BRASS STAB ~1600. Not yet measured on the device:
   the GLOBAL page shows the render time in us (budget 5800, aim < 2900).
-- MIDI CC: 74 cutoff, 71 reso, 73 amp attack, 72 amp release, 5 glide, 1 mod depth (the wheel and the knob are one
+- MIDI in: USB and (FM-1) the TRS jack share one ring (`midi_in_q`). MIDI CC: 74 cutoff, 71 reso, 73 amp attack, 72 amp release, 5 glide, 1 mod depth (the wheel and the knob are one
   value), 7 volume, 64 sustain, 120/123 all off; every other parameter from CC 20 up in table order, skipping 64
   and the fixed ones (`cc_map_init`): the first 50 parameters take 20..63 and 65 (ARP GATE), the appended ones
   66 MORPH, 67-69 chorus, 70 delay time, 75-77 delay, 78-81 reverb. Program change picks the program. New
@@ -127,7 +127,10 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 ## Status (2026-10-13, third session)
 
-Released: **1.5** (2026-10-16, FM-1_955, tag v1.5: 99 programs, 64 factory (33-64 new), 65-99 INIT; save as: SAVE, PRESETS = the slot, SAVE; the programs in 2 own flash sectors `psect` (FM-1 0x97000, SMK 0xA6000, 50 a sector), the settings sector only globals now (SET_VERSION 3, a v2 store's 32 programs move over at boot); SMK-37 1.5-beta; installed on the user's FM-1 and boots) after **1.4.3** (tag v1.4.3: HOLD per sound, `ctl_hold` bit p) after **1.4.2** (tag v1.4.2: keys and MIDI read while the screen draws; released without a device test) after **1.4.1** (tag v1.4.1: each sound its own arp) after **1.4** (tag v1.4: two sounds, track B's own program; the TRACKS view; tried on the
+Released: **1.5.1** (2026-10-19, FM-1_955, tag v1.5.1: the TRS MIDI IN on (FELUCCA_UART on the FM-1 board, sloopDX's
+midi_uart.c polled at 2 kHz in TIMER5; users said MIDI from external gear did not work), the keys send on the set
+channel (`MIDI_OUT_CH`); installed on the user's FM-1, USB-MIDI and a second update fine, the jack itself not tried here;
+SMK-37 1.5.1-beta) after **1.5** (2026-10-16, FM-1_955, tag v1.5: 99 programs, 64 factory (33-64 new), 65-99 INIT; save as: SAVE, PRESETS = the slot, SAVE; the programs in 2 own flash sectors `psect` (FM-1 0x97000, SMK 0xA6000, 50 a sector), the settings sector only globals now (SET_VERSION 3, a v2 store's 32 programs move over at boot); SMK-37 1.5-beta; installed on the user's FM-1 and boots) after **1.4.3** (tag v1.4.3: HOLD per sound, `ctl_hold` bit p) after **1.4.2** (tag v1.4.2: keys and MIDI read while the screen draws; released without a device test) after **1.4.1** (tag v1.4.1: each sound its own arp) after **1.4** (tag v1.4: two sounds, track B's own program; the TRACKS view; tried on the
 user's FM-1 first) and **SMK-37 1.4-beta** (docs/firmware/smk37, tag smk37-v1.4-beta, not yet on a real SMK-37).
 Before: **1.3.1** (FM-1_953, tag v1.3.1: the tracks coloured, A blue / B orange) after **1.3** (tag v1.3: the full-screen sequencer as SLOOP's step page, patterns as
 zp12's loops); SMK-37 1.3.1-beta was tested on a real SMK-37 on 16.10.2026: works.
