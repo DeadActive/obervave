@@ -127,6 +127,19 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 ## Status (2026-10-13, third session)
 
+**3.0** (2026-10-23, pushed to main, no release yet; installed on the user's FM-1 as a dev build): the VIBE edition
+(~/VibeFMmk1/vibe-sdk/firmware/obervave, OberVave 3.0 native; the FM-1-code 2.0 edition is in that repo's tag
+vor-aufraeumen-2026-10-22) back on the FM-1 and the SMK-37: 4 tracks A-D on the 8 voices (MONO/UNISON groups pick their
+cards: group_pick), mixer (level, pan, sends chorus/delay/reverb/drive, mute/solo, meters), DRIVE and MASTER (DJ
+filter, drive, compressor, limiter) in fixed point, tracks start/stop on the bar, every pattern keeps its sounds and
+mix (psnd_t behind the pattern in a 4-sector slot: FM-1 0x99000.., SMK 0xC2000.. in FL_SMP; 1.5's patterns and
+settings convert at boot, the old ones stay), 3.0's recording (quantise per track, nudge, legato, arp takes, knob
+lanes), SYNC AUTO/INTERNAL. Panel: ALGORITHM track, PRESETS its sound, SELECT bar (STEPS) / next pattern (sequencer,
+MIXER) / tempo, SELECT held = STEP+ (GLOBAL: SYNC), HOME again = MIXER and its rows, GLO held = keys 1-4 start/stop
+(REC: record), 5-8 mute, 9-12 solo, G5 tap; SAVE in the sequencer asks. Host worst case ~2460 instr/sample. Tests:
+tests/v3_*.txt, OBV_V15=1 simulates a 1.5 store. Shine On got the same (its own CLAUDE.md).
+
+
 Released: **1.5.3** (2026-10-19, FM-1_955, tag v1.5.3: the update loader's screen, `firmware/loader/ldr_screen.c` (the hub's look; Skiff's idea, illuminus5): name, status, 20 segments with a running light while it waits, the percent while it writes, thefirmwarehub.com; FM-1 only, the SMK-37's loader stays dark; tested on the user's FM-1, two installs) after **1.5.2** (2026-10-19, FM-1_955, tag v1.5.2 (v1.5.1 = 1.5 rebuilt by the CI): the TRS MIDI IN on (FELUCCA_UART on the FM-1 board, sloopDX's
 midi_uart.c polled at 2 kHz in TIMER5; users said MIDI from external gear did not work), the keys send on the set
 channel (`MIDI_OUT_CH`); installed on the user's FM-1, USB-MIDI and a second update fine, the jack itself not tried here;
