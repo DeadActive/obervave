@@ -174,7 +174,39 @@ static inline void rev_tick(int32_t in)
     rv_yr = (b * 19661) >> 15;
 }
 
-static void fx_process(int32_t *out, uint32_t n)
+/* (VIBE) the three effects side by side, each fed by its send bus; out gets their returns, MIX = the return's level */
+/* (VIBE, 21.10.) DRIVE, the 4th send: the tracks' drive sends distorted, its return beside the dry sound (parallel: the
+ * dry keeps its punch). Types OVERDRIVE (soft), DIST (harder, uneven), FUZZ (square), CRUSH (fewer bits, held samples);
+ * TONE a low-pass after it, MIX the return */
+enum { DV_OVERDRIVE, DV_DIST, DV_FUZZ, DV_CRUSH, NDV };
+static volatile uint8_t ctl_dv_type, ctl_dv_amt = 60, ctl_dv_tone = 90, ctl_dv_mix = 127;
+static float dv_lp, dv_hold; static uint32_t dv_n;
+static inline float dv_soft(float x) { if (x > 3.0f) return 1.0f; if (x < -3.0f) return -1.0f; return x * (27.0f + x * x) / (27.0f + 9.0f * x * x); }
+static void drive_process(int32_t *out, const int32_t *vs, uint32_t n)
+{
+    uint32_t i, ty = ctl_dv_type % NDV;
+    float a = (float)ctl_dv_amt / 127.0f, pre = 1.0f + a * 24.0f, k = 0.04f + 0.96f * (float)ctl_dv_tone / 127.0f * (float)ctl_dv_tone / 127.0f;
+    float ret = (float)ctl_dv_mix / 127.0f * 4000.0f;   /* (MIX full: the return about as loud as the dry sound) */
+    if (!ctl_dv_mix) return;
+    for (i = 0; i < n; i++) {
+        float x = (float)vs[i] * (1.0f / 32768.0f) * pre, y;
+        if (ty == DV_OVERDRIVE) y = dv_soft(x);
+        else if (ty == DV_DIST) y = x > 0.0f ? dv_soft(x * 1.6f) : dv_soft(x * 0.7f) * 0.8f;
+        else if (ty == DV_FUZZ) y = x > 0.05f ? 1.0f : x < -0.05f ? -1.0f : x * 20.0f;
+        else {                                  /* CRUSH: 16 steps, a sample held for 2..12 */
+            if (!dv_n--) { dv_n = 2u + (uint32_t)(a * 10.0f); dv_hold = (float)(int32_t)(dv_soft(x) * 8.0f) / 8.0f; }
+            y = dv_hold;
+        }
+        dv_lp += (y - dv_lp) * k;
+        {
+            int32_t v = (int32_t)(dv_lp * ret);
+            out[2u * i] = sat16(out[2u * i] + v);
+            out[2u * i + 1u] = sat16(out[2u * i + 1u] + v);
+        }
+    }
+}
+
+static void fx_process(int32_t *out, const int32_t *cs, const int32_t *ds, const int32_t *rs, uint32_t n)
 {
     uint32_t i, do_dly = dly_active != 0, do_rev = rev_active != 0;
     int32_t cm = cho_mix, dm = dly_mix, rm = rev_mix;
@@ -183,9 +215,9 @@ static void fx_process(int32_t *out, uint32_t n)
         if (cm) {                               /* two taps a quarter turn apart on one line, around 12 ms */
             int32_t bl = (529 << 16) + tri_q(cho_ph) * cho_depth_k, br = (529 << 16) + tri_q(cho_ph + 0x40000000u) * cho_depth_k;
             cho_ph += cho_inc;
-            line_write(&cho, (l + r) >> 1);
-            l += ((line_read_q16_h(&cho, bl) - l) * cm) >> 8;
-            r += ((line_read_q16_h(&cho, br) - r) * cm) >> 8;
+            line_write(&cho, cs[i]);
+            l += (line_read_q16_h(&cho, bl) * cm) >> 8;
+            r += (line_read_q16_h(&cho, br) * cm) >> 8;
         }
         if (do_dly) {                           /* ping-pong: the input enters left, the feedback crosses */
             int32_t wl, wr;
@@ -195,14 +227,14 @@ static void fx_process(int32_t *out, uint32_t n)
             wr = line_read_q16(&dr, dly_cur);
             dly_lpl += ((wr - dly_lpl) * dly_tone_k) >> 8;
             dly_lpr += ((wl - dly_lpr) * dly_tone_k) >> 8;
-            line_write(&dl, ((l + r) >> 1) + ((dly_lpl * dly_fb) >> 15));
+            line_write(&dl, ds[i] + ((dly_lpl * dly_fb) >> 15));
             line_write(&dr, (dly_lpr * dly_fb) >> 15);
             l += (wl * dm) >> 8;
             r += (wr * dm) >> 8;
         }
         if (do_rev) {
 #if REV_DIV == 2u                               /* half rate: a pair in, the output interpolated between ticks */
-            int32_t pl = rv_yl, pr = rv_yr, din = l + r;
+            int32_t pl = rv_yl, pr = rv_yr, din = rs[i] * 2;
             if (!(fx_odd ^= 1u)) {
                 rev_tick((rv_hold + din) >> 2);
                 l += (((pl + rv_yl) >> 1) * rm) >> 8;
@@ -213,7 +245,7 @@ static void fx_process(int32_t *out, uint32_t n)
             }
             rv_hold = din;
 #else
-            rev_tick((l + r) >> 1);
+            rev_tick(rs[i]);
             l += (rv_yl * rm) >> 8;
             r += (rv_yr * rm) >> 8;
 #endif
