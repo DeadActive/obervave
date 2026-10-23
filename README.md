@@ -13,8 +13,8 @@ its sounds and its mix. 99 programs (70 factory sounds).
 
 <p align="center"><img src="docs/screen.png" width="240" alt="OberVave's screen: program 01 DARK ARP, the ARP page with four knobs, the scope, eight voice LEDs"></p>
 
-> **Status: 3.0 is the source on `main`; the package on the hub is still 1.5.3** (`docs/firmware/obervave-1.5.3.fwsc`,
-> identity `FM-1_955`) until 3.0 is released. 3.0 brings OberVave's VIBE edition back to the FM-1 and the SMK-37:
+> **Released: 3.0** (`docs/firmware/obervave-3.0.fwsc`, identity `FM-1_950`; on the Firmware Hub, built and signed
+> by this repository's workflow). 3.0 brings OberVave's VIBE edition back to the FM-1 and the SMK-37:
 > four tracks on the eight voices, the mixer, DRIVE and MASTER, track launch on the bar, patterns with their own
 > sounds and mix, recording with a quantise per track (or none: as played), legato, arp takes, recorded knob moves,
 > and SYNC AUTO / INTERNAL for a MIDI clock. 1.5's programs, settings and patterns come over on the first start (the
