@@ -127,7 +127,7 @@ GPL-3.0. Identity `FM-1_95N`. Name by the user ("OberVave": Ober... + M-VAVE).
 
 ## Status (2026-10-13, third session)
 
-**3.0** (2026-10-23, pushed to main, no release yet; installed on the user's FM-1 as a dev build): the VIBE edition
+**3.0** (2026-10-23, released: tag v3.0, FM-1_950, the CI's attested package in docs/firmware; the SMK-37's 3.0 packages only on the GitHub release, docs/firmware/smk37 stays 1.5.2-beta until tried on an SMK-37): the VIBE edition
 (~/VibeFMmk1/vibe-sdk/firmware/obervave, OberVave 3.0 native; the FM-1-code 2.0 edition is in that repo's tag
 vor-aufraeumen-2026-10-22) back on the FM-1 and the SMK-37: 4 tracks A-D on the 8 voices (MONO/UNISON groups pick their
 cards: group_pick), mixer (level, pan, sends chorus/delay/reverb/drive, mute/solo, meters), DRIVE and MASTER (DJ
