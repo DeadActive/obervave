@@ -1336,6 +1336,7 @@ static void seq_view_turn(uint32_t knob, int32_t e)
         else if (knob == 3u && e > 0) pat_copy(slot_sel);
         return;
     }
+    if (seq_view == SV_TRACKS && (knob == 0 || knob == 2u)) knob ^= 2u;   /* (TRACKS: CUTOFF on knob 1, LENGTH on 3) */
     if (seq_view == SV_TRACKS && knob > 0) {    /* the track's mixer LEVEL, its sound's CUTOFF; REC's QUANTISE */
         patch_t *d = &live_p[t % NTRK];
         if (knob == 1) { set.mix_lvl[t] = (uint8_t)clampi((int32_t)set.mix_lvl[t] + e * 2, 0, 127); mix_apply(); set_dirty = 1; set_t = fm1_ms; }
@@ -1393,7 +1394,7 @@ static void seq_view_turn(uint32_t knob, int32_t e)
 
 static void seq_view_knob(knob_view_t *k, uint32_t i)
 {
-    static const char *const L[NSV][4] = {{"LENGTH", "LEVEL", "CUTOFF", "QUANT"}, {"STEP", "NOTE", "GATE", "VELO"},
+    static const char *const L[NSV][4] = {{"CUTOFF", "LEVEL", "LENGTH", "QUANT"}, {"STEP", "NOTE", "GATE", "VELO"},
                                           {"STEP", "RATCHET", "CHANCE", "ON/OFF"}, {"LENGTH", "DIV", "SWING", "TRANSP"},
                                           {"SLOT", "", "GO", "COPY"}};
     uint32_t t = seq_trk, len = pat.trk[t].len, n;
@@ -1409,8 +1410,9 @@ static void seq_view_knob(knob_view_t *k, uint32_t i)
         else if (i == 3u) scat(v, copy_arm == slot_sel + 1u && fm1_ms - copy_arm_t <= 3000u ? "AGAIN" : "TURN");
         return;
     }
-    if (seq_view == SV_TRACKS) {
+    if (seq_view == SV_TRACKS) {                /* (CUTOFF on knob 1, LENGTH on 3: as VIBE's 3.0) */
         const patch_t *d = &live_p[t % NTRK];
+        i = i == 0u ? 2u : i == 2u ? 0u : i;
         if (i == 0) { if (tk->len) fmt_u(v, tk->len); else scat(v, "OFF"); k->v = tk->len; k->max = SEQ_STEPS; }
         else if (i == 1) { fmt_u(v, set.mix_lvl[t]); k->v = set.mix_lvl[t]; k->max = 127; }
         else if (i == 2) { param_value(v, P_CUTOFF, d->v[P_CUTOFF]); k->v = d->v[P_CUTOFF]; k->max = 127; }
@@ -1567,7 +1569,14 @@ static void draw_seq_info(void)
     seq_info_line(line, &c);
     ui_trk = t;
     right[0] = 0;
-    if (len > 64u && slen(line) < 22u) {        /* which 64 the cells show */
+    if (ctl_seq_run && (ctl_trk_on >> t & 1u) && len > 16u && seq_playhead() >= 0 && (uint32_t)seq_playhead() / 16u != w0 / 16u) {
+        scat(right, "PLAYS "); fmt_u(right + slen(right), (uint32_t)seq_playhead() / 16u + 1u);   /* (another bar shown than plays) */
+        if (slen(line) > 13u) {                 /* (the line gives way: at its " - ", else after 13) */
+            uint32_t q;
+            for (q = 0; line[q] && !(line[q] == ' ' && line[q + 1u] == '-'); q++) ;
+            line[q < 13u ? q : 13u] = 0;
+        }
+    } else if (len > 64u && slen(line) < 22u) { /* which 64 the cells show */
         uint32_t a = w0 / 64u * 64u;
         fmt_u(right, a + 1u); scat(right, "-"); fmt_u(right + slen(right), a + 64u < len ? a + 64u : len);
     }
@@ -1602,8 +1611,13 @@ static void draw_seq_tracks(void)
         if (rec == REC_ON && t == seq_trk)      /* the track REC writes: REC, or NEXT while it waits for the bar */
             ui_seq_track_row(t, 1, ti, C_CREAM, rec_wait ? "NEXT" : "REC", C_RED, w0, ph);
         else
-        ui_seq_track_row(t, t == seq_trk, ti, len ? C_CREAM : C_DIMT, trk_silent(t) ? "MUTE" : !set.mix_lvl[t] ? "LVL 0" : len ? ST[st] : "OFF",
+        {
+        static char bb[NTRK][8];                /* playing, longer than a bar: which bar of how many */
+        const char *stt = ST[st];
+        if (st == 1u && ph >= 0 && len > 16u) { bb[t][0] = 0; fmt_u(bb[t], (uint32_t)ph / 16u + 1u); scat(bb[t], "/"); fmt_u(bb[t] + slen(bb[t]), (len + 15u) / 16u); stt = bb[t]; }
+        ui_seq_track_row(t, t == seq_trk, ti, len ? C_CREAM : C_DIMT, trk_silent(t) ? "MUTE" : !set.mix_lvl[t] ? "LVL 0" : len ? stt : "OFF",
                          !set.mix_lvl[t] ? C_RED : st >= 2u ? C_AMBER : st ? C_GREEN : C_DIMT, w0, ph);
+        }
     }
 }
 static void seq_tracks_line(char *s, uint16_t *c)
@@ -1856,7 +1870,7 @@ static void trk_select(uint32_t t)
     t %= NTRK;
     if (t != seq_trk) { seq_trk = t; step_held = -1; audition_off(); entry_reset(); }
     msg[0] = 0; scat(msg, "TRACK "); msg[6] = TRK_L[t]; msg[7] = 0;
-    if (!pat.trk[t].len) scat(msg, " OFF: " NM_K1 " = ON");
+    if (!pat.trk[t].len) scat(msg, is_seq_page(page) && seq_view == SV_TRACKS ? " OFF: " NM_K3 " = ON" : " OFF: " NM_K1 " = ON");
     say(msg);
     dirty_page = dirty_steps = dirty_tags = dirty_hdr = 1;
 }

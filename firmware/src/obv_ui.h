@@ -370,7 +370,7 @@ static void ui_seq_info(uint32_t t, const char *line, uint16_t lc, const char *r
     uint32_t len = pat.trk[t].len, win = w0 / 64u * 64u, i;
     cv_begin(240, 52, C_PANEL);
     cv_text(4, 0, &FONT_S, line, lc);
-    if (right) cv_text(236 - text_w(&FONT_S, right), 0, &FONT_S, right, C_DIMT);
+    if (right) cv_text(236 - text_w(&FONT_S, right), 0, &FONT_S, right, right[0] == 'P' ? C_CREAM : C_DIMT);   /* (PLAYS n: bright) */
     for (i = 0; i < 64u; i++) {                 /* the overview: four rows of 16 */
         uint32_t n = win + i;
         int32_t x = (int32_t)(i % 16u) * 15 + 1, y = 20 + (int32_t)(i / 16u) * 8;
@@ -434,6 +434,16 @@ static void ui_seq_track_row(uint32_t t, uint32_t sel, const char *title, uint16
         else cc = n % 4u ? (sel ? C_PANEL : C_KNOB) : C_KNOB_HI;
         cv_rect(x, 21, 10, 9, cc);
         if (playhead >= 0 && n == (uint32_t)playhead) cv_rect(x, 31, 10, 2, C_CREAM);
+    }
+    if (len > 16u) {                            /* the whole track under it: a piece per bar, filled up to where it plays */
+        uint32_t bars = (len + 15u) / 16u, k, pg = playhead >= 0 ? (uint32_t)playhead / 16u : 0xFFFFu;
+        for (k = 0; k < bars; k++) {
+            int32_t x0 = 36 + (int32_t)(k * 194u / bars), x1 = 36 + (int32_t)((k + 1u) * 194u / bars) - 2, w = x1 - x0;
+            uint32_t in = len - k * 16u < 16u ? len - k * 16u : 16u;
+            cv_rect(x0, 33, w, 1, sel ? C_PANEL : C_KNOB);
+            if (k < pg) cv_rect(x0, 33, w, 1, dim);
+            else if (k == pg) cv_rect(x0, 33, (int32_t)(((uint32_t)playhead - k * 16u + 1u) * (uint32_t)w / in), 1, C_CREAM);
+        }
     }
     cv_rect(0, 35, 240, 1, C_RULE);
     cv_blit(0, 24 + (int32_t)t * 36);
