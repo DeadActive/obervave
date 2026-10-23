@@ -540,7 +540,7 @@ static void splash_frame(uint32_t fade, int32_t x_to, uint32_t sub)
         if (++x == SPLASH_W) { x = 0; y++; }
     }
     if (sub) {                                      /* the line under the logo, as in assets/logo.png, in two rows */
-        const char *t1 = "4-TRACK ANALOG POLY", *t2 = "VIBE FM MK1";
+        const char *t1 = "4-TRACK ANALOG POLY", *t2 = "M-VAVE FM-1";
         uint16_t c = sub >= 256u ? C_AMBER : blend565(C_PANEL, C_AMBER, sub);
         cv_text((240 - text_w(&FONT_S, t1)) / 2, SPLASH_H + 14, &FONT_S, t1, c);
         cv_text((240 - text_w(&FONT_S, t2)) / 2, SPLASH_H + 28, &FONT_S, t2, c);
