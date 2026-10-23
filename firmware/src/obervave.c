@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* OberVave, VIBE edition: an analog-style polysynth in the spirit of the classic American poly synths of 1979-84,
- * grown from OberVave 1.5 for the M-VAVE FM-1 into four tracks for VIBE FM Mk1: each track its own sound, its own
- * arpeggiator and its own sequence; a mixer (level, pan, effects send, mute, solo); the tracks start and stop on
- * the bar, from the pads, as clips in Ableton Live. Built on Dinghy's platform (platform.c), run by VIBE's adapter.
+/* OberVave 3.0: an analog-style polysynth for the M-VAVE FM-1 (and the SMK-37) in the spirit of the classic American
+ * poly synths of 1979-84. Four tracks, each with its own sound, arpeggiator and sequence, sharing the eight voices; a
+ * mixer (level, pan, four effect sends, mute, solo) with a MASTER (DJ filter, drive, compressor); the tracks start and
+ * stop on the bar, as clips in Ableton Live; every pattern keeps its sounds and its mix. Grown from the VIBE edition
+ * (OberVave 2.0 / 3.0 for VIBE FM Mk1) back onto the FM-1. Built on Dinghy's platform (platform.c).
  *
  *   obv_dsp.h       oscillators (polyBLEP events), filter (trapezoidal SVF), tanh
  *   obv_params.h    the parameter table: patches, pages, MIDI CC
@@ -36,23 +37,24 @@ static void app_audio(int32_t *out, uint32_t n)
 
 /* ---- what survives a power-off: the user programs and the globals, one settings sector */
 #define NFXP (P_REV_MIX - P_CHO_RATE + 1u)     /* the effects' parameters */
-#define SET_VERSION 6u                          /* 6: effects full, sends 0 (VIBE); 5: three sends per track (VIBE); 4: VIBE's four tracks and the mixer;
-                                                   3: the programs in their own sectors */
+#define SET_VERSION 7u                          /* 7: 3.0, four tracks and the mixer; 3: 1.5, the programs in their own sectors;
+                                                   2: 1.4, 32 programs in here */
 static struct {
     uint8_t version, prog, tempo, midi_ch;      /* midi_ch 0 = omni, else 1..16: track A's channel, B-D the next three */
     int8_t tune, oct;
-    uint8_t pat, click;                         /* pat: the sequencer pattern (its own sectors); click: CLICK_* */
+    uint8_t pat, click;                         /* pat: the sequencer pattern (its own flash slot); click: CLICK_* */
     uint8_t tprog[NTRK];                        /* each track's program */
     uint8_t mix_lvl[NTRK];                      /* the mixer: level 0..127 (100 = unity) */
-    uint8_t mix_cho[NTRK], mix_dly[NTRK], mix_rev[NTRK];   /* (VIBE) the sends into chorus, delay, reverb 0..127 */
+    uint8_t mix_cho[NTRK], mix_dly[NTRK], mix_rev[NTRK];   /* the sends into chorus, delay, reverb 0..127 */
     int8_t mix_pan[NTRK];                       /* -64..64 */
-    uint8_t mix_mute, mix_solo, rec_q, pad;     /* mute, solo: bit t; rec_q: REC's quantise, RQ_* */
+    uint8_t mix_mute, mix_solo, rec_q, sync_int;   /* mute, solo: bit t; rec_q: (unused); sync_int: 1 = SYNC INTERNAL
+                                                 * (a MIDI clock, start and stop are ignored) */
     uint8_t fx[NFXP], fx_ok;                    /* the effects (chorus, delay, reverb): the song's, not a sound's; ok: FX_OK */
-    uint8_t rec_qt[NTRK], rec_qt_ok;            /* (VIBE, 21.10.) REC's quantise per track (was rec_q for all); ok: RQT_OK */
-    uint8_t mix_drv[NTRK], dv_type, dv_amt, dv_tone, dv_mix, dv_ok;   /* (VIBE, 21.10.) the drive send per track, the drive's
-                                                   type, amount, tone, return; ok: DV_OK */
-    uint8_t m_vol, m_dj, m_drive, m_comp, m_ok; /* (VIBE, 21.10.) MASTER: volume (100 = unity), DJ filter (64 = off, below LP,
-                                                   above HP), drive, compressor – the VIBE runtime applies them; ok: M_OK */
+    uint8_t rec_qt[NTRK], rec_qt_ok;            /* REC's quantise per track; ok: RQT_OK */
+    uint8_t mix_drv[NTRK], dv_type, dv_amt, dv_tone, dv_mix, dv_ok;   /* the drive send per track, the drive's type,
+                                                   amount, tone, return; ok: DV_OK */
+    uint8_t m_vol, m_dj, m_drive, m_comp, m_ok; /* MASTER: volume (100 = unity), DJ filter (64 = off, below LP, above
+                                                   HP), drive, compressor; ok: M_OK */
 } set;
 #define MIDI_OUT_CH (set.midi_ch ? (set.midi_ch - 1u + seq_trk % NTRK) & 15u : 0u)   /* the keys go out on the track's MIDI channel (OMNI: 1) */
 #define RQT_OK 0xA5u
@@ -64,6 +66,11 @@ enum { RQ_OFF, RQ_32, RQ_16, RQ_8, RQ_4, NRQ };   /* REC: unquantised, or to 1/3
 static const char *const RQ_NAME[NRQ] = {"OFF", "1/32", "1/16", "1/8", "1/4"};
 static const uint8_t RQ_PER_QUARTER[NRQ] = {0, 8, 4, 2, 1};
 static const uint8_t TPROG_DEF[NTRK] = {0, 6, 42, 57};   /* DARK ARP, FAT BASS, WARM PAD, SOLO LEAD */
+typedef struct {                                /* SET_VERSION 3 (1.5.x): read once, to bring the globals over */
+    uint8_t version, prog, tempo, midi_ch;
+    int8_t tune, oct;
+    uint8_t pat, click;
+} set_v3_t;
 typedef struct {                                /* SET_VERSION 2 (1.4.3 and before): read once, to bring the programs over */
     uint8_t version, prog, tempo, midi_ch;
     int8_t tune, oct;
@@ -91,7 +98,7 @@ static uint32_t seq_trk, seq_cur[NTRK], seq_pg[NTRK], rec, pat_edited, pat_dirty
 static uint32_t rec_down, rec_down_t, beat_seen, beat_t;   /* rec_down: REC held since rec_down_t */
 static uint32_t rec_wait;                       /* a track + 1 that REC waits for: it records from its start on the bar */
 static struct { uint16_t step; uint32_t t; } rec_open[128];   /* a recorded note still held: where and when it began */
-static pattern_t undo_pat;                      /* one level of undo: the pattern before the last pass / erase / clear */
+static pattern_t undo_pat __attribute__((section(".pool")));                      /* one level of undo: the pattern before the last pass / erase / clear */
 static uint32_t undo_ok;
 static uint8_t erase_on[128];                   /* notes erased while their key is held (EDIT + key, playing) */
 static uint32_t erase_pos = 0xFFFFFFFFu;
@@ -105,14 +112,13 @@ static int is_seq_page(uint32_t pg) { return pg == PG_SEQ; }
 enum { SV_TRACKS, SV_STEPS, SV_MORE, SV_TRACK, SV_SLOTS, NSV };   /* TRACKS first: A-D one under the other (SLOOP) */
 static const char *const SV_NAME[NSV] = {"TRACKS", "STEPS", "STEP+", "TRACK", "PATTERNS"};
 #define SV_ENTRY(v) ((v) == SV_STEPS || (v) == SV_MORE)   /* the views where the keys write into the cursor's step */
-/* (VIBE) STEP+ is no view of its own any more: SHIFT held in STEPS shows its knobs (RATCHET, CHANCE, ON/OFF) */
-static uint32_t vibe_more;
-static int32_t vibe_snd_steps;             /* (VIBE) B, F3/F4, ◀ ▶: the track's sound – on every page, also in the sequencer */
-static int32_t vibe_pat_steps;             /* (VIBE) DATA in MIXER and TRACKS: the next / previous pattern (on the bar) */
-#define SV_EFF (seq_view == SV_STEPS && vibe_more ? (uint32_t)SV_MORE : seq_view)
+/* STEP+ is no view of its own: SELECT held down in STEPS shows its knobs (RATCHET, CHANCE, ON/OFF), as VIBE's SHIFT */
+static uint32_t more_held;
+#define SV_EFF (seq_view == SV_STEPS && more_held ? (uint32_t)SV_MORE : seq_view)
 static uint32_t seq_view, slot_sel, pat_used, pat_next, arm_k, arm_t, entry_n, pat_edit_t, pend_slot, pat_save_say;
 static uint8_t entry_on_note[128];              /* the keys writing into the cursor step now */
 static uint16_t slot_len[NBLOB][NTRK];          /* the saved patterns' track lengths (the PATTERNS view) */
+static uint32_t pat_save_armed, pat_save_t, q_edited;   /* q_edited: the next pattern brings unsaved edits */    /* SAVE tapped in the sequencer: SAVE PATTERN? (again: saved) */
 static uint32_t pat_queue, copy_to, copy_arm, copy_arm_t;   /* pat_queue: the next pattern + 1 (playing: on the next bar) */
 enum { CLICK_OFF, CLICK_REC, CLICK_ON, CLICK_COUNT, NCLICK };   /* COUNT: as REC, and REC armed + PLAY counts in a bar */
 static const char *const CLICK_NAME[NCLICK] = {"OFF", "REC", "ON", "COUNT-IN"};
@@ -162,6 +168,9 @@ static int seq_shown(void) { return is_seq_page(page) || layer == L_SEQ || layer
 static uint8_t pen_chord[4];                    /* the last note or chord played: what an empty step gets */
 static uint32_t pen_n, notes_down, tap_t[3];
 static void say(const char *s) { toast = s; toast_t = fm1_ms; }
+static void fmt_u(char *s, uint32_t v);
+static uint32_t slen(const char *s);
+static void scat(char *d, const char *s);
 
 /* the step view: the 16 white keys are steps 1-16 of the page, the black keys are the sequencer's functions */
 static const int8_t KEY_STEP[27] = {0, -1, 1, -1, 2, -1, 3, 4, -1, 5, -1, 6, 7, -1, 8, -1, 9, -1, 10, 11, -1, 12, -1, 13, 14, -1, 15};
@@ -250,22 +259,167 @@ static void mix_apply(void)
 }
 static uint32_t trk_silent(uint32_t t) { return ctl_mix_off >> (t % NTRK) & 1u; }
 
-/* (VIBE) every pattern left with edits stays here, so going back to it while playing finds the edits (the FM-1 could
- * only write its flash when stopped, and loaded the old version); written to the store at the next stop */
-static pattern_t pcache[NPAT];
-static uint32_t pc_valid, pc_dirty;
-static void pat_fetch(uint32_t n, pattern_t *p)   /* a pattern: the edited copy if there is one, else saved, else factory */
+/* ---- every pattern keeps its instruments and its mix (as VIBE's 3.0): the four tracks' sounds with their edits and
+ * program numbers, the mixer (level, pan, the four sends, mute, solo), the effects and MASTER. They live behind the
+ * pattern's steps in its flash slot, all eight sets in RAM; a pattern without its own set takes what is playing */
+#define PSN2_MAGIC 0x324E5350u                  /* "PSN2" */
+typedef struct {
+    uint8_t lvl[NTRK], cho[NTRK], dly[NTRK], rev[NTRK], drv[NTRK]; int8_t pan[NTRK];
+    uint8_t mute, solo, fx[NFXP], dv_type, dv_amt, dv_tone, dv_mix, m_vol, m_dj, m_drive, m_comp;
+} mixset_t;
+typedef struct { uint32_t magic; uint8_t prog[NTRK], edited[NTRK]; patch_t p[NTRK]; mixset_t mx; } psnd_t;
+static psnd_t psnd[NPAT], psnd_tmp;
+static uint32_t snd_dirty, snd_t, snd_chg_t;    /* bit n: pattern n's set changed (its slot to save); snd_t: the last look;
+                                                 * snd_chg_t: the last change */
+static int bytes_same(const void *a, const void *b, uint32_t n) { const uint8_t *x = a, *y = b; while (n--) if (*x++ != *y++) return 0; return 1; }
+static void mx_from_set(mixset_t *m)
 {
-    if (pc_valid >> n & 1u) { *p = pcache[n]; return; }
-    if (blob_load(n, p, sizeof *p) || p->magic != PAT_MAGIC) pat_factory(n, p);
+    uint32_t t, i;
+    for (t = 0; t < NTRK; t++) { m->lvl[t] = set.mix_lvl[t]; m->cho[t] = set.mix_cho[t]; m->dly[t] = set.mix_dly[t]; m->rev[t] = set.mix_rev[t]; m->drv[t] = set.mix_drv[t]; m->pan[t] = set.mix_pan[t]; }
+    m->mute = set.mix_mute; m->solo = set.mix_solo;
+    for (i = 0; i < NFXP; i++) m->fx[i] = set.fx[i];
+    m->dv_type = set.dv_type; m->dv_amt = set.dv_amt; m->dv_tone = set.dv_tone; m->dv_mix = set.dv_mix;
+    m->m_vol = set.m_vol; m->m_dj = set.m_dj; m->m_drive = set.m_drive; m->m_comp = set.m_comp;
 }
-static void load_pattern(uint32_t n)            /* the saved one, else the factory's */
+static void mx_to_set(const mixset_t *m)        /* into the settings and the engine */
 {
-    pattern_t *p = &pat;
+    uint32_t t, i;
+    for (t = 0; t < NTRK; t++) { set.mix_lvl[t] = m->lvl[t]; set.mix_cho[t] = m->cho[t]; set.mix_dly[t] = m->dly[t]; set.mix_rev[t] = m->rev[t]; set.mix_drv[t] = m->drv[t]; set.mix_pan[t] = m->pan[t]; }
+    set.mix_mute = m->mute; set.mix_solo = m->solo;
+    for (i = 0; i < NFXP; i++) set.fx[i] = m->fx[i];
+    set.fx_ok = FX_OK;
+    set.dv_type = m->dv_type; set.dv_amt = m->dv_amt; set.dv_tone = m->dv_tone; set.dv_mix = m->dv_mix;
+    set.m_vol = m->m_vol; set.m_dj = m->m_dj; set.m_drive = m->m_drive; set.m_comp = m->m_comp;
+    mix_apply();
+}
+static void mx_prepare(uint32_t n)              /* pattern n's mixer, drive, master as the ISR takes them (mx_q) */
+{
+    const psnd_t *s = &psnd[n % NPAT];
+    uint32_t t, solo, mute;
+    if (s->magic != PSN2_MAGIC) {               /* (no own set: the mix stays as it is) */
+        for (t = 0; t < NTRK; t++) { mx_q.lvl[t] = ctl_mix_lvl[t]; mx_q.cho[t] = ctl_mix_cho[t]; mx_q.dly[t] = ctl_mix_dly[t]; mx_q.rev[t] = ctl_mix_rev[t]; mx_q.drv[t] = ctl_mix_drv[t]; mx_q.pan[t] = ctl_mix_pan[t]; }
+        mx_q.off = ctl_mix_off; mx_q.dv_type = ctl_dv_type; mx_q.dv_amt = ctl_dv_amt; mx_q.dv_tone = ctl_dv_tone; mx_q.dv_mix = ctl_dv_mix;
+        mx_q.m_vol = ctl_m_vol; mx_q.m_dj = ctl_m_dj; mx_q.m_drive = ctl_m_drive; mx_q.m_comp = ctl_m_comp;
+        return;
+    }
+    for (t = 0; t < NTRK; t++) {
+        mx_q.lvl[t] = s->mx.lvl[t] > 127u ? 127u : s->mx.lvl[t]; mx_q.pan[t] = (int8_t)clampi(s->mx.pan[t], -64, 64);
+        mx_q.cho[t] = s->mx.cho[t] > 127u ? 127u : s->mx.cho[t]; mx_q.dly[t] = s->mx.dly[t] > 127u ? 127u : s->mx.dly[t];
+        mx_q.rev[t] = s->mx.rev[t] > 127u ? 127u : s->mx.rev[t]; mx_q.drv[t] = s->mx.drv[t] > 127u ? 127u : s->mx.drv[t];
+    }
+    solo = s->mx.solo & ((1u << NTRK) - 1u); mute = s->mx.mute & ((1u << NTRK) - 1u);
+    mx_q.off = solo ? ~solo & ((1u << NTRK) - 1u) : mute;
+    mx_q.dv_type = s->mx.dv_type; mx_q.dv_amt = s->mx.dv_amt; mx_q.dv_tone = s->mx.dv_tone; mx_q.dv_mix = s->mx.dv_mix;
+    mx_q.m_vol = s->mx.m_vol; mx_q.m_dj = s->mx.m_dj; mx_q.m_drive = s->mx.m_drive; mx_q.m_comp = s->mx.m_comp;
+}
+static void snd_capture(uint32_t n)             /* what plays now into pattern n's set */
+{
+    psnd_t *s = &psnd[n % NPAT];
+    uint32_t t;
+    s->magic = PSN2_MAGIC;
+    for (t = 0; t < NTRK; t++) { s->p[t] = live_p[t]; s->prog[t] = (uint8_t)trk_prog[t]; s->edited[t] = (uint8_t)trk_edited[t]; }
+    mx_from_set(&s->mx);
+    snd_dirty |= 1u << (n % NPAT);
+    snd_chg_t = fm1_ms;
+}
+static void snd_target(uint32_t n, patch_t *out)   /* pattern n's four sounds (its effects in track A's, where the engine reads them) */
+{
+    const psnd_t *s = &psnd[n % NPAT];
+    uint32_t t, i;
+    for (t = 0; t < NTRK; t++) out[t] = s->magic == PSN2_MAGIC ? s->p[t] : live_p[t];
+    for (i = 0; i < NFXP; i++) out[0].v[P_CHO_RATE + i] = s->magic == PSN2_MAGIC ? s->mx.fx[i] : set.fx[i];
+}
+static void snd_meta(uint32_t n)                /* pattern n's program numbers and edit marks, its mixer, effects, master */
+{
+    const psnd_t *s = &psnd[n % NPAT];
+    uint32_t t;
+    if (s->magic != PSN2_MAGIC) { snd_capture(n); return; }
+    for (t = 0; t < NTRK; t++) { trk_prog[t] = s->prog[t] % NPROG; trk_edited[t] = s->edited[t]; set.tprog[t] = (uint8_t)trk_prog[t]; }
+    set.prog = set.tprog[0];
+    mx_to_set(&s->mx);
+    set_dirty = 1; set_t = fm1_ms;
+}
+static int snd_changed(uint32_t n)              /* the sounds and the mix now differ from pattern n's set */
+{
+    const psnd_t *s = &psnd[n % NPAT];
+    mixset_t now;
+    uint32_t t;
+    if (s->magic != PSN2_MAGIC) return 1;
+    for (t = 0; t < NTRK; t++)
+        if (s->prog[t] != trk_prog[t] || s->edited[t] != trk_edited[t] || !bytes_same(&s->p[t], &live_p[t], sizeof(patch_t))) return 1;
+    mx_from_set(&now);
+    return !bytes_same(&s->mx, &now, sizeof now);
+}
+
+/* ---- the patterns of 1.5 (two tracks sharing 256 steps, one sector each): read once to bring them over. A plays the
+ * program of 1.5, B its own (or A's), both into the effects as before; C and D are off */
+#define PAT1_MAGIC 0x31514553u                  /* "SEQ1" */
+typedef struct { uint8_t note[SEQ_CHORD], vel, gate, ratch, chance; } step1_t;
+typedef struct { uint32_t magic; seqtrk_t trk[2]; step1_t st[SEQ_STEPS]; } pattern1_t;
+static uint32_t v1_snd;                         /* bit n: psnd[n] was made from 1.5's pattern n already */
+static int pat_from_v1(uint32_t n, pattern_t *p)
+{
+    static pattern1_t o __attribute__((section(".pool")));
+    uint32_t i, t, bp, bdry;
+    n %= NPAT;
+    if (blob_load(n, &o, sizeof o) || o.magic != PAT1_MAGIC) return -1;
+    pat_init(p);
+    for (t = 0; t < 2u; t++) {
+        uint32_t len = o.trk[t].len > SEQ_STEPS ? SEQ_STEPS : o.trk[t].len;
+        p->trk[t] = o.trk[t];
+        p->trk[t].len = (uint16_t)len; p->trk[t].mute = 0; p->trk[t].pad[0] = p->trk[t].pad[1] = 0;
+        for (i = 0; i < len; i++) {             /* (A from the front, B from the back) */
+            const step1_t *a = &o.st[t ? SEQ_STEPS - 1u - i : i];
+            step_t *d = &p->st[t][i];
+            memcpy(d->note, a->note, SEQ_CHORD);
+            d->vel = a->vel; d->gate = a->gate; d->ratch = a->ratch; d->chance = a->chance; d->nudge = 0;
+        }
+    }
+    p->trk[2].len = p->trk[3].len = 0;
+    if (v1_snd >> n & 1u) return 0;
+    v1_snd |= 1u << n;
+    bp = o.trk[1].pad[0]; bdry = o.trk[1].pad[1] > 127u ? 127u : o.trk[1].pad[1];
+    {
+        psnd_t *s = &psnd[n];
+        s->magic = PSN2_MAGIC;
+        for (t = 0; t < NTRK; t++) {
+            uint32_t pr = t == 0u ? set.tprog[0] : t == 1u ? (bp && bp <= NPROG ? bp - 1u : set.tprog[0]) : TPROG_DEF[t];
+            s->prog[t] = (uint8_t)pr; s->edited[t] = 0;
+            prog_get(pr, &s->p[t]);
+        }
+        mx_from_set(&s->mx);
+        for (i = 0; i < NFXP; i++) s->mx.fx[i] = s->p[0].v[P_CHO_RATE + i];   /* (A's program's effects, as 1.5 played them) */
+        s->mx.cho[0] = s->mx.dly[0] = s->mx.rev[0] = 127;
+        s->mx.cho[1] = s->mx.dly[1] = s->mx.rev[1] = (uint8_t)(bp ? 127u - bdry : 127u);
+        s->mx.mute = (uint8_t)((o.trk[0].mute ? 1u : 0u) | (o.trk[1].mute ? 2u : 0u));
+        s->mx.solo = 0;
+    }
+    return 0;
+}
+
+static void pat_fetch(uint32_t n, pattern_t *p)   /* pattern n: its slot, else 1.5's, else empty (its sounds stay in psnd[]) */
+{
+    n %= NPAT;
+    if (!slot_load(n, p, sizeof *p, &psnd_tmp, sizeof psnd_tmp) && p->magic == PAT_MAGIC) {
+        if (p->auto_magic != AUTO_MAGIC) auto_init(p);
+        return;
+    }
+    if (!pat_from_v1(n, p)) return;
+    pat_factory(n, p);
+}
+static void load_pattern(uint32_t n)            /* stopped: pattern n with its sounds and its mix */
+{
+    uint32_t t;
     n %= NPAT;
     ctl_panic = 1;                              /* (what the old one held lets go) */
-    pat_fetch(n, p);
+    pat_fetch(n, &pat);
     set.pat = (uint8_t)n;
+    if (psnd[n].magic == PSN2_MAGIC) {
+        patch_t nx[NTRK];
+        snd_target(n, nx);
+        for (t = 0; t < NTRK; t++) live_p[t] = nx[t];
+    }
+    snd_meta(n);
     memset(seq_cur, 0, sizeof seq_cur); memset(seq_pg, 0, sizeof seq_pg);
     pat_edited = 0;
     pat_edit_t = 0;
@@ -280,19 +434,25 @@ static void seq_cursor_set(uint32_t t, uint32_t n)   /* the cursor, and the roll
 static void undo_save(void) { undo_pat = pat; undo_ok = 1; }
 
 /* where now is on track t, as you heard it (the ~12 ms from a key to its sound taken back), in steps Q8, put on REC's
- * grid: 1/32 .. 1/4 (as many steps of the track as that is; finer than a step: a nudge into it), or OFF: as played */
+ * grid: 1/32 .. 1/4 (as many steps of the track as that is; finer than a step: a nudge into it), or OFF: as played.
+ * An arp note: where the ISR played it (rec_arp_q8), never moved */
+static uint32_t rec_arp_q8 = 0xFFFFFFFFu;
 static uint32_t rec_where(uint32_t t, uint32_t *nudge)
 {
     uint32_t len = pat.trk[t].len, dur = ui_seq_dur[t] ? ui_seq_dur[t] : 1u, back = 529u * 256u / dur, rq = set.rec_qt[t % NTRK] % NRQ;
-    uint32_t q8 = ui_seq_pos[t] * 256u + (ui_seq_frac[t] > 256u ? 256u : ui_seq_frac[t]), g8;
-    if (rec_from_arp) { back = 0; rq = RQ_OFF; }    /* (the arp's notes are on the grid already) */
-    q8 = q8 >= back ? q8 - back : q8 + len * 256u - back;
+    uint32_t q8 = ui_seq_pos[t] * 256u + (ui_seq_frac[t] > 256u ? 256u : ui_seq_frac[t]), g8, snapw;
+    if (rec_from_arp) {
+        rq = RQ_OFF;
+        if (rec_arp_q8 != 0xFFFFFFFFu) q8 = rec_arp_q8 % (len * 256u);
+    } else q8 = q8 >= back ? q8 - back : q8 + len * 256u - back;
     if (rq != RQ_OFF) {                         /* the grid in steps Q8: the track's steps per quarter / REC's */
         g8 = 256u * DIV_PER_QUARTER[pat.trk[t].div % NDIV] / RQ_PER_QUARTER[rq];
         if (!g8) g8 = 1;
         q8 = (q8 + g8 / 2u) / g8 * g8;
     }
-    if (rec_from_arp && (q8 & 255u) < 24u) q8 &= ~255u;   /* (the arp is on the grid: the few ms to here are not a nudge) */
+    snapw = rec_from_arp ? 24u : 3u;            /* (on a step's line, an arp note or a key within ~1 ms: on it) */
+    if ((q8 & 255u) < snapw) q8 &= ~255u;
+    else if ((q8 & 255u) > 255u - snapw) q8 = (q8 | 255u) + 1u;
     q8 %= len * 256u;
     *nudge = (q8 & 255u) >> 1;                  /* (0..127: how far into the step) */
     return q8 >> 8;
@@ -308,31 +468,57 @@ static void step_add(step_t *st, uint32_t note, uint32_t vel)   /* a note into a
     st->ratch &= (uint8_t)~STEP_OFF;
 }
 
-/* REC: a note (key or MIDI). Armed, the first note starts the loop on step 1. Recording, it lands on the nearest
- * step on top of what is there; when it is let go its length is written: a fraction of the step, or ties on. */
+/* the steps where this recording started a note (a legato note ends there, not into it) */
+static uint32_t rec_on_bits[NTRK][SEQ_STEPS / 32u];
+static void rec_begin(void) { rec = REC_ON; undo_save(); memset(rec_on_bits, 0, sizeof rec_on_bits); }
+#define REC_ON_AT(t, s) (rec_on_bits[(t) % NTRK][((s) % SEQ_STEPS) >> 5] >> ((s) & 31u) & 1u)
+
+/* an arp take: from its first note while the keys (or HOLD) keep the arp going. When the loop comes round, what it
+ * writes replaces what it wrote the round before (else every step got a second note and the take turned into chords);
+ * the track's old steps are not played meanwhile (ctl_rec_mute) */
+static uint32_t take_on, take_trk, take_pass, take_last;
+static uint8_t take_mark[SEQ_STEPS];            /* the round (1..255) that wrote each step, 0 = not in this take */
+static void take_step(uint32_t t, uint32_t s0, step_t *st)
+{
+    if (!take_on || take_trk != t) { take_on = 1; take_trk = t; take_pass = 1; take_last = s0; memset(take_mark, 0, sizeof take_mark); ctl_rec_mute = 1u << t; }
+    if (s0 < take_last) take_pass = take_pass >= 255u ? 1u : take_pass + 1u;   /* (round again) */
+    take_last = s0;
+    if (take_mark[s0 % SEQ_STEPS] && take_mark[s0 % SEQ_STEPS] != take_pass) st->note[0] = 0;   /* (step_add: anew) */
+    take_mark[s0 % SEQ_STEPS] = (uint8_t)take_pass;
+}
+static void take_check(void)                    /* the take is over: keys up and no HOLD, or REC off */
+{
+    if (take_on && (rec != REC_ON || (!notes_down && !(hold >> take_trk & 1u)) || !live_p[take_trk % NTRK].v[P_ARP_MODE])) { take_on = 0; ctl_rec_mute = 0; }
+}
+
+/* REC: a note (key, MIDI or the arp). Armed, the first note starts the loop on step 1. Recording, it lands where it was
+ * heard, on top of what is there; when it is let go its length is written: a fraction of the step, or ties on, up to
+ * the next note this recording started (legato) */
 static void rec_note(uint32_t on, uint32_t note, uint32_t vel)
 {
-    uint32_t t = seq_trk, len = pat.trk[t].len, s0, n, k, held, sms, nudge = 0;
-    note &= 127u;
+    uint32_t t = seq_trk % NTRK, len = pat.trk[t].len, s0 = 0, n, k, held, sms, nudge = 0, sounding;
+    note &= 127u; sounding = note;
     if (!len) return;
     if (ctl_count || rec_wait) return;          /* counting in, waiting for the bar: notes only sound */
-    if (on && rec == REC_READY && !ctl_seq_run) {   /* the first note: from the top (playing, READY is armed: a pad starts a take) */
+    if (on && rec == REC_READY && !ctl_seq_run) {   /* the first note: from the top */
         ctl_seq_restart = 1; ctl_seq_run = 1;
-        rec = REC_ON;
-        undo_save();
-        s0 = 0;
+        rec_begin();
     } else if (rec != REC_ON)
         return;
     else if (on)
         s0 = ctl_seq_restart ? 0u : rec_where(t, &nudge);
     if (on) {
         step_t *st = seq_step(t, s0);
-        uint32_t was = st->note[0];
+        uint32_t was;
+        if (rec_from_arp) take_step(t, s0, st);
+        was = st->note[0];
         note = (uint32_t)clampi((int32_t)note - pat.trk[t].transp, 1, 127);   /* stored as heard */
         step_add(st, note, vel);
         if (!was) st->nudge = (uint8_t)nudge;   /* (a chord keeps its first note's timing) */
         rec_open[note].step = (uint16_t)s0;
         rec_open[note].t = fm1_ms + 1u;         /* (+1: 0 means none) */
+        rec_on_bits[t][(s0 % SEQ_STEPS) >> 5] |= 1u << (s0 & 31u);
+        if (!rec_from_arp) ctl_live_hold[t][sounding >> 5] |= 1u << (sounding & 31u);   /* (the key owns it now) */
         pat_edited = 1;
         return;
     }
@@ -344,16 +530,48 @@ static void rec_note(uint32_t on, uint32_t note, uint32_t vel)
     sms = ui_seq_dur[t] ? ui_seq_dur[t] * 10u / 441u : 125u;   /* a step in ms */
     if (!sms) sms = 1;
     n = (held + sms / 2u) / sms;                /* the steps it spans */
+    if (n > len) n = len;
+    for (k = 1; k < n; k++)                     /* legato: up to the next step where this recording started a note */
+        if (REC_ON_AT(t, (s0 + k) % len)) {
+            if (k == 1u) { seq_step(t, s0)->gate = 120; return; }
+            n = k;
+            break;
+        }
     if (n <= 1u) {
         seq_step(t, s0)->gate = (uint8_t)clampi((int32_t)(held * 127u / sms), 24, 120);
         return;
     }
-    if (n > len) n = len;
     for (k = 0; k < n; k++) {                   /* tied on: the note in each step it lasts, the last one ends */
         step_t *st = seq_step(t, (s0 + k) % len);
         step_add(st, note, vel ? vel : REC_TIE_VEL(t, s0));
         st->gate = k + 1u < n ? GATE_TIE : 110;
     }
+}
+
+/* a knob turned while REC records (the sequencer playing, the track on): its value onto the step the track plays now, in
+ * the lane of that parameter (a new one if there is none yet, NLANE per track). While it turns, the player leaves the
+ * lane to the hand (ctl_auto_hold, let go 250 ms after the last turn: auto_poll) */
+static uint32_t auto_hold_t[NTRK][NLANE];
+static void auto_rec(uint32_t p)
+{
+    static char m[32];
+    uint32_t t = seq_trk % NTRK, l, f = NLANE, len = pat.trk[t].len;
+    if (rec != REC_ON || !ctl_seq_run || !len || !(ctl_trk_on >> t & 1u) || is_a_only(p) || p >= NPARAM) return;
+    for (l = 0; l < NLANE; l++) { if (pat.lane[t][l].param == p) break; if (f == NLANE && pat.lane[t][l].param == AUTO_NONE) f = l; }
+    if (l == NLANE) {
+        if (f == NLANE) { m[0] = 0; scat(m, "TRACK "); m[6] = TRK_L[t]; m[7] = 0; scat(m, ": 4 KNOBS RECORDED"); say(m); return; }
+        l = f; lane_clear(&pat.lane[t][l]); pat.lane[t][l].param = (uint8_t)p;
+    }
+    pat.lane[t][l].v[ui_seq_pos[t] % len] = live_p[t].v[p];
+    ctl_auto_hold[t] |= 1u << l; auto_hold_t[t][l] = fm1_ms;
+    pat_edited = 1;
+}
+static void auto_poll(void)                     /* (main loop) a lane let go: the player has it again */
+{
+    uint32_t t, l;
+    for (t = 0; t < NTRK; t++)
+        for (l = 0; l < NLANE; l++)
+            if ((ctl_auto_hold[t] >> l & 1u) && fm1_ms - auto_hold_t[t][l] > 250u) ctl_auto_hold[t] &= ~(1u << l);
 }
 
 /* EDIT held + a key: that note leaves the pattern (stopped: everywhere at once; playing: where the playhead passes
@@ -680,8 +898,8 @@ static void draw_page(void)
             t = title;
         }
         {
-            static char cpu[16];                /* the GLOBAL page: the render time of an audio half (budget 5800 us) */
-            cpu[0] = 0; scat(cpu, "CPU "); fmt_u(cpu + slen(cpu), ui_render_us); scat(cpu, "us");
+            static char cpu[24];                /* the GLOBAL page: the render time of an audio half (budget 5800 us), SYNC */
+            cpu[0] = 0; fmt_u(cpu, ui_render_us); scat(cpu, "us"); scat(cpu, set.sync_int ? " INT" : ctl_ext_quarter ? " CLK" : " AUTO");
             ui_page(t, k, save_armed ? "SAVE?" : seq_shown() && pat_edited ? "EDITED" : page == PG_GLOBAL && !layer ? cpu : 0);
         }
     }
@@ -711,7 +929,7 @@ static void draw_hints(void)
 #else
         {"HOLD SEQ: KEYS ARE STEPS", "HOLD " NM_EDIT ": KEYS ERASE"},
 #endif
-        {NM_ALGO ": TRACK A-D", NM_SELECT ": TEMPO"},
+        {NM_ALGO ": TRACK A-D", "HOLD GLO: START/STOP MUTE"},
         {"PLAY: START  REC: RECORD LIVE", "REC HELD=CLEAR " NM_EDIT "+KEY=ERASE"}};
     static char ring[24];
     uint32_t r = (fm1_ms / 3500u) % 3u, key, held = rec_down ? fm1_ms - rec_down_t : 0u;
@@ -732,12 +950,12 @@ static void draw_hints(void)
     if (toasting) ui_hints(toast, "", C_AMBER);
     else if (rec == REC_ON && ui_seq_count) { static char cnt[16]; cnt[0] = 0; scat(cnt, "COUNT-IN  "); fmt_u(cnt + slen(cnt), 5u - ui_seq_count); ui_hints(cnt, "RECORDING FROM THE NEXT 1", C_RED); }
     else if (rec == REC_ON) { static char m[24]; m[0] = 0; scat(m, "RECORDING TRACK "); m[slen(m) + 1] = 0; m[slen(m)] = TRK_L[seq_trk % NTRK]; ui_hints(m, "PLAY ON TOP  REC: STOP REC", C_RED); }
-    else if (rec == REC_READY && ctl_seq_run) ui_hints("REC ARMED", "PADS 1-4: RECORD A TRACK", C_RED);
+    else if (rec == REC_READY && ctl_seq_run) ui_hints("REC ARMED", "GLO + KEY 1-4: RECORD A TRACK", C_RED);
     else if (rec == REC_READY) ui_hints("REC READY", "YOUR FIRST NOTE STARTS IT", C_RED);
     else if (step_held >= 0) ui_hints("KNOB: EDIT  TAP LATER: LONG", "NOTE  LEVEL  RATCHET  GATE", C_AMBER);
     else if (layer == L_SEQ) ui_hints("WHITE KEYS = STEPS  OCT: PAGE", "F#3-A#4: PAGE 1-8 " NM_HOME ": LOCK", C_AMBER);
     else if (layer == L_EDIT) ui_hints("KEY: ERASE THAT NOTE", "OCT-: UNDO  OCT+: REDO", C_AMBER);
-    else if (layer == L_GLO) ui_hints("KEYS 1-4: MUTE A-D  5-8: SOLO", "LAST KEY (G5): TAP TEMPO", C_AMBER);
+    else if (layer == L_GLO) ui_hints(rec ? "1-4: RECORD A-D  5-8: MUTE" : "1-4: START/STOP A-D 5-8: MUTE", "9-12: SOLO  G5: TAP TEMPO", C_AMBER);
     else if (layer == L_SAVE) ui_hints("WHITE 1-8: GO  BLACK 1-8: COPY", "+ " NM_SELBTN " PRESSED: NEW SOUND", C_AMBER);
     else if (layer == L_FX) ui_hints("KNOBS: CHORUS DELAY REVERB", "AND THE DELAY'S TIME", C_AMBER);
     else ui_hints(ROT[r][0], ROT[r][1], C_CREAM);
@@ -931,14 +1149,18 @@ static void mix_solo(uint32_t t)
     say(msg);
 }
 
-/* GLO held: white keys 1-4 mute tracks A-D, 5-8 solo them, the last (G5) taps the tempo */
+/* GLO held, the tracks' layer (VIBE's pads): white keys 1-4 start / stop tracks A-D on the bar (REC lit: that track
+ * records), 5-8 mute them, 9-12 solo them, the last (G5) taps the tempo */
+static void trk_launch(uint32_t t);
+static void trk_record(uint32_t t);
 static void glo_key(uint32_t k)
 {
     static char msg[16];
     int32_t s2 = KEY_STEP[k];
-    if (s2 >= 0 && s2 < 4) mix_mute((uint32_t)s2);
-    else if (s2 >= 4 && s2 < 8) mix_solo((uint32_t)(s2 - 4));
-    else if (s2 == 15) {                      /* tap tempo: the mean of the last taps */
+    if (s2 >= 0 && s2 < 4) { if (rec) trk_record((uint32_t)s2); else trk_launch((uint32_t)s2); }
+    else if (s2 >= 4 && s2 < 8) mix_mute((uint32_t)(s2 - 4));
+    else if (s2 >= 8 && s2 < 12) mix_solo((uint32_t)(s2 - 8));
+    else if (s2 == 15) {                        /* tap tempo: the mean of the last taps */
         tap_t[2] = tap_t[1]; tap_t[1] = tap_t[0]; tap_t[0] = fm1_ms;
         if (tap_t[1] && tap_t[0] - tap_t[1] < 2000u) {
             uint32_t span = tap_t[2] && tap_t[1] - tap_t[2] < 2000u ? (tap_t[0] - tap_t[2]) / 2u : tap_t[0] - tap_t[1];
@@ -947,7 +1169,6 @@ static void glo_key(uint32_t k)
             say(msg);
         } else say("TAP AGAIN");
     }
-    pat_edited = 1;
 }
 
 /* ---- the full-screen sequencer, as SLOOP's STEP page: KNOB 1 moves the cursor, the keys write their note or
@@ -988,16 +1209,22 @@ static void entry_note(uint32_t on, uint32_t note, uint32_t vel)
 
 static void entry_reset(void) { entry_n = 0; memset(entry_on_note, 0, sizeof entry_on_note); }
 
-static void slot_lens_read(void)                /* which slots hold a pattern (undo_pat as the buffer: only at boot) */
+/* which slots hold a pattern, its tracks' lengths, and every pattern's sounds (at boot; undo_pat as the buffer) */
+static void slot_lens_read(void)
 {
-    uint32_t i;
+    uint32_t i, t;
     pat_used = 0;
-    for (i = 0; i < NPAT; i++)
-        if (!blob_load(i, &undo_pat, sizeof undo_pat) && undo_pat.magic == PAT_MAGIC) {
-            uint32_t t;
-            pat_used |= 1u << i;
-            for (t = 0; t < NTRK; t++) slot_len[i][t] = undo_pat.trk[t].len;
+    for (i = 0; i < NPAT; i++) {
+        psnd[i].magic = 0;
+        if (!slot_load(i, &undo_pat, sizeof undo_pat, &psnd[i], sizeof psnd[i]) && undo_pat.magic == PAT_MAGIC) {
+            if (psnd[i].magic != PSN2_MAGIC) psnd[i].magic = 0;
+        } else {
+            psnd[i].magic = 0;
+            if (pat_from_v1(i, &undo_pat)) continue;   /* (1.5's pattern: converted, its sounds in psnd[i]) */
         }
+        pat_used |= 1u << i;
+        for (t = 0; t < NTRK; t++) slot_len[i][t] = undo_pat.trk[t].len;
+    }
 }
 
 static void slot_saved(uint32_t n, const pattern_t *p)
@@ -1005,16 +1232,20 @@ static void slot_saved(uint32_t n, const pattern_t *p)
     uint32_t t;
     pat_used |= 1u << n;
     for (t = 0; t < NTRK; t++) slot_len[n][t] = p->trk[t].len;
+    snd_dirty &= ~(1u << n);                    /* (its sounds went with it) */
 }
 
-/* another pattern, now (stopped). This one's edits are written first; a pattern left while playing (pat_old, from
- * the ISR's swap) waits there for the stop */
+/* another pattern, now (stopped), with its sounds and its mix. This one's edits are written first; a pattern left
+ * while playing (pat_old, from the ISR's swap) waits there for the stop */
 static void pat_switch(uint32_t n)
 {
     static char msg[20];
     n %= NPAT;
-    if (n != set.pat && pat_edited) { pat_dirty = 1; pat_next = n + 1u; return; }   /* saved when quiet, then loaded */
-    if (n != set.pat) load_pattern(n);
+    if (n != set.pat) {
+        if (snd_changed(set.pat)) snd_capture(set.pat);   /* (its instruments stay with it) */
+        if (pat_edited) { pat_dirty = 1; pat_next = n + 1u; return; }   /* saved when quiet, then loaded */
+        load_pattern(n);
+    }
     slot_sel = n;
     set_dirty = 1; set_t = fm1_ms;
     msg[0] = 0; scat(msg, "PATTERN "); fmt_u(msg + slen(msg), n + 1u);
@@ -1022,23 +1253,37 @@ static void pat_switch(uint32_t n)
     say(msg);
 }
 
-/* stopped, at once; playing, on the next bar (the ISR swaps pat_q in on the downbeat) */
+/* stopped, at once; playing, on the next bar: the ISR swaps pat_q in on the downbeat, and its sounds (snd_q) and its
+ * mix (mx_q) on the same one, so the new pattern's first note plays its own instrument */
 static void pat_go(uint32_t n)
 {
     static char msg[20];
     n %= NPAT;
-    if (pat_queue) { ctl_pat_swap = 0; pat_queue = 0; }
+    if (pat_queue) {                            /* another one was next: take it back (the ISR never stops us halfway) */
+        fm1_irq_off();
+        if (ctl_pat_swap == 1u) { ctl_pat_swap = 0; ctl_snd_swap = 0; ctl_mx_swap = 0; pat_queue = 0; }
+        fm1_irq_on();
+        if (pat_queue) { say("ONE MOMENT"); return; }
+    }
     if (!ctl_seq_run) { pat_switch(n); return; }
     if (n == set.pat) { say("STAYS"); return; }
-    ctl_pat_keep = 1;                           /* (VIBE: the one left goes to pat_old, then into the cache) */
-    pat_fetch(n, &pat_q);
+    if (pend_slot && pat_edited) { say("STOP ONCE: THE LAST ONE SAVES"); return; }   /* (pat_old holds one, unsaved) */
+    if (snd_changed(set.pat)) snd_capture(set.pat);
+    if (pend_slot == n + 1u) {                  /* back to the one left with its edits (not saved yet): those */
+        pat_q = pat_old; pend_slot = 0; q_edited = 1;
+    } else { pat_fetch(n, &pat_q); q_edited = 0; }
+    ctl_pat_keep = !pend_slot;                  /* (the one left comes back in pat_old, with its edits; pat_old waiting
+                                                 * for the stop is never overwritten) */
+    snd_target(n, snd_q); ctl_snd_swap = 1;
+    mx_prepare(n); ctl_mx_swap = 1;
     pat_queue = n + 1u;
+    RING_PUBLISH();
     ctl_pat_swap = 1;
     msg[0] = 0; scat(msg, "PATTERN "); fmt_u(msg + slen(msg), n + 1u); scat(msg, " NEXT");
     say(msg);
 }
 
-/* SAVE held + a black key: this pattern into slot n (a used one: press again); written when stopped and quiet */
+/* this pattern into slot n, with its sounds (a used one: again); written when stopped and quiet */
 static void pat_copy(uint32_t n)
 {
     static char msg[24];
@@ -1281,11 +1526,12 @@ static void seq_info_line(char *s, uint16_t *c)
     if (rec == REC_ON && ui_seq_count) { scat(s, "COUNT-IN "); fmt_u(s + slen(s), 5u - ui_seq_count); return; }
     if (rec_wait) { scat(s, "TRACK "); s[6] = TRK_L[(rec_wait - 1u) % NTRK]; s[7] = 0; scat(s, " RECORDS ON THE BAR"); return; }
     if (rec == REC_ON) { scat(s, "RECORDING: PLAY ON TOP"); return; }
-    if (rec == REC_READY) { scat(s, ctl_seq_run ? "REC ARMED: PADS 1-4 RECORD" : "REC READY: FIRST NOTE STARTS"); return; }
+    if (rec == REC_READY) { scat(s, ctl_seq_run ? "REC ARMED: GLO+1-4 RECORD" : "REC READY: FIRST NOTE STARTS"); return; }
     *c = C_AMBER;
     if (layer == L_SEQ) { scat(s, step_held >= 0 ? "KNOBS EDIT THE HELD STEP" : "WHITE KEYS = 16 STEPS"); return; }
     if (layer == L_EDIT) { scat(s, "KEY: ERASE  OCT: UNDO/REDO"); return; }
     if (layer == L_SAVE) { scat(s, "WHITE 1-8: GO  BLACK: COPY"); return; }
+    if (layer == L_GLO) { scat(s, "1-4 START  5-8 MUTE  9-12 SOLO"); return; }
     if (layer) { scat(s, "LET GO: BACK"); return; }
     *c = C_CREAM;
     if (seq_view == SV_TRACK) {
@@ -1368,13 +1614,13 @@ static void seq_tracks_line(char *s, uint16_t *c)
     if (toast && fm1_ms - toast_t < 1500u) { scat(s, toast); return; }
     if (rec_wait) { *c = C_RED; scat(s, "TRACK "); s[6] = TRK_L[t]; s[7] = 0; scat(s, " RECORDS ON THE BAR"); return; }
     if (rec) { *c = C_RED; scat(s, rec == REC_ON ? "RECORDING " : ctl_seq_run ? "REC ARMED " : "REC READY "); { char l[2] = {TRK_L[t], 0}; if (rec == REC_ON) scat(s, l); }
-               scat(s, rec == REC_ON ? "  PADS: RECORD" : "  PADS: RECORD A-D"); return; }
+               scat(s, rec == REC_ON ? "  GLO+1-4" : "  GLO+1-4: RECORD"); return; }
     *c = C_DIMT;
     { char l[2] = {TRK_L[t], 0}; scat(s, l); }
     scat(s, ": ");
     if (pat.trk[t].len) { fmt_u(s + slen(s), pat.trk[t].len); scat(s, " "); scat(s, DIV_NAME[pat.trk[t].div % NDIV]); }
     else scat(s, "OFF");
-    scat(s, "  PADS: START/STOP");
+    scat(s, "  GLO+1-4: START");
 }
 
 static void draw_seq_slots(void)
@@ -1433,6 +1679,31 @@ static uint32_t keys_prev, clk_n, clk_t0, clk_last, idle_ok;
 static uint8_t held_key[27], key_step[27];
 static int notes_shown(void) { return seq_shown() || rec; }   /* the only screens a note changes */
 
+/* a note from the keys or MIDI on the chosen track: it sounds, REC takes it, the sequencer's views use it */
+static void note_in(uint32_t on, uint32_t note, uint32_t vel)
+{
+    uint32_t t;
+    note &= 127u;
+    play_note(on, note, vel);
+    if (!on) for (t = 0; t < NTRK; t++) ctl_live_hold[t][note >> 5 & 3u] &= ~(1u << (note & 31u));   /* (let go: the sequencer's again) */
+    if (rec_keys()) rec_note(on, note, vel);
+    if (on) {
+        pen_add(note);
+        if (step_held < 0) entry_note(1, note, vel);
+        else if (!rec) {                        /* a held step takes what is played: the first note starts the chord */
+            step_t *sp = seq_step(seq_trk, (uint32_t)step_held);
+            uint32_t q;
+            if (!step_midi++) { for (q = 0; q < SEQ_CHORD; q++) sp->note[q] = 0; sp->ratch &= (uint8_t)~STEP_OFF; }
+            for (q = 0; q < SEQ_CHORD && sp->note[q] && sp->note[q] != note; q++) ;
+            if (q < SEQ_CHORD && !sp->note[q]) { sp->note[q] = (uint8_t)note; sp->vel = (uint8_t)vel; }
+            pat_edited = 1;
+        }
+    } else {
+        if (notes_down) notes_down--;
+        entry_note(0, note, 0);
+    }
+}
+
 #if BOARD_SMK37
 #include "obv_smk.h"                            /* the SMK-37's pads, outer keys, faders, wheels, < >, FADER BANK */
 #endif
@@ -1468,10 +1739,8 @@ static void keys_in(uint32_t notes_only)
                     else { msg[0] = 0; scat(msg, "PATTERN "); fmt_u(msg + slen(msg), set.pat + 1u); say(msg); }
                 } else if (KEY_PAGE[k] >= 0) pat_copy((uint32_t)KEY_PAGE[k]);
             } else {
-                play_note(1, held_key[k], KEY_VEL(k)); midi_send(0x90u | MIDI_OUT_CH, held_key[k], KEY_VEL(k));
-                if (rec_keys()) rec_note(1, held_key[k], KEY_VEL(k));
-                pen_add(held_key[k]);
-                entry_note(1, held_key[k], KEY_VEL(k));   /* the full-screen sequencer: into the cursor's step */
+                midi_send(0x90u | MIDI_OUT_CH, held_key[k], KEY_VEL(k));
+                note_in(1, held_key[k], KEY_VEL(k));
                 if (notes_shown()) dirty_steps = dirty_page = 1;
                 continue;
             }
@@ -1483,10 +1752,8 @@ static void keys_in(uint32_t notes_only)
             if (key_step[k] == 2u) erase_on[(uint32_t)clampi((int32_t)held_key[k] - pat.trk[seq_trk].transp, 1, 127)] = 0;
             else if (key_step[k] == 1u) seq_key_up(k);
             else if (key_step[k] == 0u) {
-                play_note(0, held_key[k], 0); midi_send(0x80u | MIDI_OUT_CH, held_key[k], 0);
-                if (rec_keys()) rec_note(0, held_key[k], 0);
-                if (notes_down) notes_down--;
-                entry_note(0, held_key[k], 0);
+                midi_send(0x80u | MIDI_OUT_CH, held_key[k], 0);
+                note_in(0, held_key[k], 0);
                 if (notes_shown()) dirty_steps = dirty_page = 1;
                 continue;
             }
@@ -1508,13 +1775,19 @@ static void midi_in(uint32_t notes_only)
             break;
         }
         ch = (st & 15u) + 1u; kind = st & 0xF0u;
-        if (st == 0xF8u) {                  /* clock: 24 per quarter; the tempo follows, 2 s without it and it is gone */
-            if (!clk_n) clk_t0 = fm1_ms;
+        if (set.sync_int && (st == 0xF8u || st == 0xFAu || st == 0xFBu || st == 0xFCu)) continue;   /* (SYNC INTERNAL) */
+        if (st == 0xF8u) {                  /* clock: 24 per quarter. The tempo from 4 quarters (96 clocks) in rendered
+                                             * frames, rounded to 48 as our own (quarter_len); taken only when it moves
+                                             * by more than 0.3 %: the clock's jitter must not wobble the steps */
+            if (!clk_n || fm1_ms - clk_last > 250u) { clk_n = 0; clk_t0 = eng_t; }
             clk_last = fm1_ms;
-            if (++clk_n == 25u) {
-                uint32_t ms = fm1_ms - clk_t0;
-                if (ms > 200u && ms < 1600u) ctl_ext_quarter = ms * 441u / 10u;
-                clk_n = 0;
+            if (++clk_n == 97u) {
+                uint32_t q = ((eng_t - clk_t0) / 4u + 24u) / 48u * 48u, d;
+                if (q > FS / 5u && q < FS * 8u / 5u) {
+                    d = q > ctl_ext_quarter ? q - ctl_ext_quarter : ctl_ext_quarter - q;
+                    if (!ctl_ext_quarter || d * 1000u > 3u * q) ctl_ext_quarter = q;
+                }
+                clk_n = 1; clk_t0 = eng_t;
             }
             continue;
         }
@@ -1540,21 +1813,11 @@ static void midi_in(uint32_t notes_only)
         }
         if (set.midi_ch && ch != set.midi_ch) continue;
         if (kind == 0x90u && d2) {
-            play_note(1, d1, d2); if (rec_keys()) rec_note(1, d1, d2); pen_add(d1);
-            if (step_held < 0) entry_note(1, d1, d2);
-            if (step_held >= 0 && !rec) {   /* a held step takes what MIDI plays: the first note starts the chord */
-                step_t *sp = seq_step(seq_trk, (uint32_t)step_held);
-                uint32_t q;
-                if (!step_midi++) { for (q = 0; q < SEQ_CHORD; q++) sp->note[q] = 0; sp->ratch &= (uint8_t)~STEP_OFF; }
-                for (q = 0; q < SEQ_CHORD && sp->note[q] && sp->note[q] != d1; q++) ;
-                if (q < SEQ_CHORD && !sp->note[q]) { sp->note[q] = d1; sp->vel = d2; }
-                pat_edited = 1;
-            }
+            note_in(1, d1, d2);
             if (notes_shown()) dirty_steps = dirty_page = 1;
         }
         else if (kind == 0x80u || kind == 0x90u) {
-            play_note(0, d1, 0); if (rec_keys()) rec_note(0, d1, 0); if (notes_down) notes_down--;
-            entry_note(0, d1, 0);
+            note_in(0, d1, 0);
             dirty_page |= rec || is_seq_page(page); dirty_steps = 1;
         }
         else if (kind == 0xE0u) ctl_bend = (int32_t)(d1 | d2 << 7) - 8192;
@@ -1566,6 +1829,7 @@ static void midi_in(uint32_t notes_only)
             else if (cc_map[d1]) {
                 uint32_t p = cc_map[d1] - 1u;
                 set_param(p, PDEF[p].max == 127 ? (int32_t)d2 : ((int32_t)d2 * PDEF[p].max + 63) / 127);
+                auto_rec(p);
                 if (p == P_CUTOFF) cut_shown_t = fm1_ms + 1u;
                 dirty_page = dirty_hdr = 1;
                 if (p == P_MODE || p == P_FTYPE || p == P_ARP_MODE) dirty_tags = 1;
@@ -1584,8 +1848,7 @@ static void app_idle(void)                      /* lcd.c while a strip goes out,
     busy = 0;
 }
 
-/* ---- VIBE's panel (its adapter calls these): F1 the mixer, F2 the tracks, the pads in those two views: row 1 starts
- * and stops the tracks on the bar, row 2 solos, row 3 mutes (the MPK mini's bank B on top), row 4 chooses the track the keys play and the pages edit */
+/* ---- the tracks: chosen (ALGORITHM), started / stopped on the bar and recorded (GLO held + keys 1-4), cleared (REC held) */
 static uint32_t req_page;                       /* a page asked for + 1: taken by the main loop */
 static void trk_select(uint32_t t)
 {
@@ -1616,7 +1879,7 @@ static void trk_launch(uint32_t t)              /* start / stop on the next bar 
     say(msg);
     dirty_steps = dirty_tags = 1;
 }
-/* REC lit + a pad of row 1: that track records (Ableton's session record). Playing: from now; stopped or starting:
+/* REC lit + GLO held + key 1-4: that track records (Ableton's session record). Playing: from now; stopped or starting:
  * it starts (stopped transport: at once, from the top, with the count-in) and records from its start on the bar.
  * Its own pad again: the take ends, the track plays on, REC stays armed (REC itself switches it off). Another track's pad: the recording moves there. */
 static void trk_record(uint32_t t)
@@ -1639,83 +1902,34 @@ static void trk_record(uint32_t t)
     will = (ctl_trk_on ^ trk_pending()) >> t & 1u;
     if (!will) ctl_trk_req ^= 1u << t;          /* stopped, or stopping on the bar: it plays (again) */
     if (!ctl_seq_run) {                         /* as PLAY with REC armed */
-        rec = REC_ON; undo_save();
+        rec_begin();
         ctl_count = set.click % NCLICK == CLICK_COUNT;
         ctl_seq_restart = 1; ctl_seq_run = 1;
         scat(msg, " RECORDING");
     } else if (trk_pending() >> t & 1u) {       /* starts on the bar: REC with it */
-        rec = REC_ON; undo_save(); rec_wait = t + 1u;
+        rec_begin(); rec_wait = t + 1u;
         scat(msg, " RECORDS ON THE BAR");
     } else {
-        rec = REC_ON; undo_save();
+        rec_begin();
         scat(msg, " RECORDING");
     }
     say(msg);
     dirty_steps = dirty_tags = dirty_page = 1;
 }
-/* the chosen track emptied (REC held, or SHIFT + REC on VIBE at once); one undo. A take on it goes on armed */
+/* the chosen track emptied (REC held 1.2 s), its recorded knobs too; one undo. A take on it goes on armed */
 static void trk_clear(void)
 {
     static char m[20];
     uint32_t n;
     undo_save();
     for (n = 0; n < pat.trk[seq_trk].len; n++) step_clear(seq_step(seq_trk, n));
+    for (n = 0; n < NLANE; n++) lane_clear(&pat.lane[seq_trk % NTRK][n]);
     pat_edited = 1;
     if (rec == REC_ON) { rec = ctl_seq_run ? REC_READY : REC_OFF; rec_wait = 0; }
     memset(rec_open, 0, sizeof rec_open);
     m[0] = 0; scat(m, "TRACK "); m[6] = TRK_L[seq_trk % NTRK]; m[7] = 0; scat(m, " CLEARED"); say(m);
     dirty_tags = dirty_steps = dirty_page = 1;
 }
-/* the pads in TRACKS and on the sound pages (not the SEQ steps, not the MIXER, no layer held): row 1 starts / stops
- * the tracks on the bar (REC lit: records them; SHIFT: starts / stops always), row 2 chooses the track (on the MPK
- * mini IV: bank A's upper and lower row); rows 3 and 4 play notes. Mute and solo: the MIXER */
-static int vibe_pad_perf(void)
-{
-    return !layer && step_held < 0 && page != PG_MIXER && (!seq_shown() || (is_seq_page(page) && seq_view == SV_TRACKS));
-}
-static int vibe_pad_all(void) { return is_seq_page(page) && seq_view == SV_TRACKS; }   /* TRACKS: rows 3-4 = rows 1-2 (either MPK bank) */
-static void vibe_pad_perf_press(uint32_t pad, int shift)
-{
-    pad &= 7u;
-    if (pad < 4u) { if (rec && !shift) trk_record(pad); else trk_launch(pad); }
-    else trk_select(pad - 4u);
-    dirty_steps = dirty_page = dirty_tags = dirty_hdr = 1;
-}
-static int vibe_pad_view(void) { return !layer && page == PG_MIXER; }
-static void vibe_pad(uint32_t pad, int shift)   /* a pad pressed in the mixer */
-{
-    uint32_t row = pad / 4u, t = pad % 4u;
-    if (row == 0u) { if (rec && !shift) trk_record(t); else trk_launch(t); }
-    else if (row == 1u || row == 2u) { if (shift) mix_solo(t); else mix_mute(t); }   /* (VIBE, Sven 20.10.: mute; SHIFT: solo –
-                                                     rows 2 and 3, so either MPK bank has it) */
-    else trk_select(t);
-    dirty_steps = dirty_page = 1;
-}
-static void vibe_f1(void)                       /* F1: the mixer; there, its next row (LEVEL, PAN, SEND) */
-{
-    if (page == PG_MIXER && !layer) { mix_row = (mix_row + 1u) % 7u; dirty_page = 1; return; }
-    if (layer) { layer = L_NONE; layer_lock = 0; }
-    mix_row = 0;
-    req_page = PG_MIXER + 1u;
-}
-static void vibe_global(void)                   /* F6: GLOBAL at once on the press (no layer: mute/solo are the pads now);
-                                                 * again: VOICE, OUTPUT, GLOBAL (as GLO tapped on the FM-1) */
-{
-    if (layer) { layer = L_NONE; layer_lock = 0; }
-    req_page = (page == PG_GLOBAL ? PG_VOICE : page == PG_VOICE ? PG_OUTPUT : PG_GLOBAL) + 1u;
-    dirty_page = dirty_steps = dirty_tags = 1;
-}
-static void vibe_f2(void)                       /* F2: the tracks (the sequencer's TRACKS view); there, back */
-{
-    if (layer) { layer = L_NONE; layer_lock = 0; }
-    if (is_seq_page(page) && seq_view == SV_TRACKS) { req_page = (seq_back == PG_SEQ ? PG_PERFORM : seq_back) + 1u; return; }
-    if (!is_seq_page(page)) seq_back = page;
-    seq_view = SV_TRACKS;
-    step_held = -1; audition_off(); entry_reset();
-    req_page = PG_SEQ + 1u;
-    dirty_page = dirty_steps = 1;
-}
-
 static void app_main(void)
 {
     uint32_t k, i, t_led = 0, t_scope = 0, t_page = 0, t_hdr = 0, leds_q = 1;
@@ -1736,12 +1950,17 @@ static void app_main(void)
         set.version = 0;
         if (settings_load(&set, sizeof set) || set.version != SET_VERSION) {
             static set_v2_t old __attribute__((section(".pool")));
+            set_v3_t o3;
             memset(&set, 0, sizeof set);
             set.version = SET_VERSION;
             set.tempo = 120;
-            set.click = CLICK_REC;              /* (VIBE, 20.10.: the click while recording, from the start) */
-            old.version = 0;
-            if (!settings_load(&old, sizeof old) && old.version == 2u) {   /* 1.4.x: its globals and 32 programs move */
+            set.click = CLICK_REC;              /* (the click while recording, from the start) */
+            old.version = 0; o3.version = 0;
+            if (!settings_load(&o3, sizeof o3) && o3.version == 3u) {   /* 1.5.x: its globals; its patterns come over by themselves */
+                set.prog = o3.prog; set.tempo = o3.tempo; set.midi_ch = o3.midi_ch;
+                set.tune = o3.tune; set.oct = o3.oct; set.pat = o3.pat; set.click = o3.click;
+                set_dirty = 1;
+            } else if (!settings_load(&old, sizeof old) && old.version == 2u) {   /* 1.4.x: its globals and 32 programs move */
                 set.prog = old.prog; set.tempo = old.tempo; set.midi_ch = old.midi_ch;
                 set.tune = old.tune; set.oct = old.oct; set.pat = old.pat; set.click = old.click;
                 for (n = 0; n < 32u; n++)
@@ -1750,13 +1969,12 @@ static void app_main(void)
             }
         }
     }
-    if (set.version != SET_VERSION || !set.mix_lvl[0]) {   /* (new: the four tracks' sounds and the mixer) */
+    if (!set.mix_lvl[0] && !set.mix_lvl[1] && !set.mix_lvl[2] && !set.mix_lvl[3]) {   /* (new: the tracks' sounds and the mixer) */
         uint32_t t;
         for (t = 0; t < NTRK; t++) { set.tprog[t] = TPROG_DEF[t]; set.mix_lvl[t] = 100; set.mix_cho[t] = set.mix_dly[t] = set.mix_rev[t] = 0; set.mix_pan[t] = 0; }
-        /* (VIBE, Sven 20.10.: the effects up full, the sends closed – a track is sent into them on purpose) */
-        for (t = 0; t < NFXP; t++) set.fx[t] = (uint8_t)PDEF[P_CHO_RATE + t].def;
-        set.fx[P_CHO_MIX - P_CHO_RATE] = set.fx[P_DLY_MIX - P_CHO_RATE] = set.fx[P_REV_MIX - P_CHO_RATE] = 127;
-        set.fx_ok = FX_OK;
+        /* track A into the effects as OberVave always was (its program's chorus, delay, reverb); B-D are sent on purpose */
+        set.mix_cho[0] = set.mix_dly[0] = set.mix_rev[0] = 127;
+        set.fx_ok = 0;                          /* (fx_sync below takes them from track A's program) */
         set.tprog[0] = set.prog;
         set.mix_mute = set.mix_solo = 0;
         set.rec_q = RQ_16;
@@ -1781,8 +1999,9 @@ static void app_main(void)
         set_dirty = 0;
     }
     mix_apply();
+    if (set.pat >= NPAT) set.pat = 0;
+    slot_lens_read();                           /* (every pattern's sounds; 1.5's patterns converted) */
     load_pattern(set.pat);
-    slot_lens_read();
     slot_sel = set.pat;
     ctl_panic = 0;
 
@@ -1799,11 +2018,20 @@ static void app_main(void)
         smk_pads(base, &dirty_steps);           /* the step pads, the outer keys */
         if (dirty_steps) dirty_page = 1;
 #endif
-        while (arp_qr != arp_qw) {              /* REC with the arp on: what it plays is recorded */
-            uint8_t on = arp_q[arp_qr % AQ][0], n = arp_q[arp_qr % AQ][1], ap = arp_q[arp_qr % AQ][2], av = arp_q[arp_qr % AQ][3];
+        take_check();
+        while (arp_qr != arp_qw) {              /* REC with the arp on: what it plays is recorded, where it played it */
+            arpev_t ev;
+            RING_TAKE();
+            ev = arp_q[arp_qr % AQ];
             arp_qr++;
-            if (ap == seq_trk && ed_patch(P_ARP_MODE)->v[P_ARP_MODE]) { rec_from_arp = 1; rec_note(on, n, av ? av : 100u); rec_from_arp = 0; dirty_steps = 1; }
+            if (ev.part == seq_trk && ed_patch(P_ARP_MODE)->v[P_ARP_MODE]) {
+                rec_from_arp = 1; rec_arp_q8 = ev.q8;
+                rec_note(ev.on, ev.note, ev.vel ? ev.vel : 100u);
+                rec_from_arp = 0; rec_arp_q8 = 0xFFFFFFFFu;
+                dirty_steps = 1;
+            }
         }
+        auto_poll();
         if (ctl_seq_run && pat.trk[seq_trk].len && ui_seq_pos[seq_trk] != erase_pos) {   /* erasing as the playhead passes */
             uint32_t n;
             erase_pos = ui_seq_pos[seq_trk];
@@ -1814,6 +2042,17 @@ static void app_main(void)
         /* buttons, as sloopDX: tapped = its pages, held = a layer, HOME while held = locked open (any layer button
          * then only lets it go); PLAY, REC, OCT work inside a layer */
         b = fm1_input_edges(&rel);
+        if (b & ~(1u << BTN_SAVE)) pat_save_armed = 0;   /* (SAVE PATTERN?: any other button says no) */
+        {
+            uint32_t mh = is_seq_page(page) && seq_view == SV_STEPS && !layer && (fm1_in.buttons >> BTN_SEL & 1u);
+            if (mh != more_held) { more_held = mh; dirty_page = dirty_steps = 1; }   /* (SELECT held in STEPS: STEP+) */
+        }
+        if (b & (1u << BTN_SEL) && page == PG_GLOBAL && !layer) {   /* GLOBAL: SELECT pressed = SYNC AUTO / INTERNAL */
+            set.sync_int = !set.sync_int; set_dirty = 1; set_t = fm1_ms;
+            if (set.sync_int) { ctl_ext_quarter = 0; clk_n = 0; }
+            say(set.sync_int ? "SYNC INTERNAL" : "SYNC AUTO: A MIDI CLOCK LEADS");
+            dirty_page = 1;
+        }
         {
             static const uint8_t LB[5] = {BTN_SEQ, BTN_EDIT, BTN_GLO, BTN_SAVE, BTN_FX};
             static const uint8_t LL[5] = {L_SEQ, L_EDIT, L_GLO, L_SAVE, L_FX};
@@ -1830,8 +2069,8 @@ static void app_main(void)
                     if (layer != LL[k] || layer_lock) continue;
                     if (!layer_used && fm1_ms - layer_t < 600u) {   /* a tap: the button's pages */
                         if (LL[k] == L_SEQ) {   /* SEQ: the full-screen sequencer; there, its next view (as SLOOP) */
-                            static const char *const HINT[NSV] = {NM_ALGO ": A / B", "KEYS WRITE  SHIFT: MORE", "MORE PER STEP", "THE TRACK: LENGTH ..", "THE 8 PATTERNS"};
-                            if (is_seq_page(page)) { seq_view = (seq_view + 1u) % NSV; if (seq_view == SV_MORE) seq_view = SV_TRACK; }   /* (VIBE: STEP+ = SHIFT in STEPS) */
+                            static const char *const HINT[NSV] = {NM_ALGO ": TRACK A-D", "KEYS WRITE  " NM_SELBTN " HELD: MORE", "MORE PER STEP", "THE TRACK: LENGTH ..", "THE 8 PATTERNS"};
+                            if (is_seq_page(page)) { seq_view = (seq_view + 1u) % NSV; if (seq_view == SV_MORE) seq_view = SV_TRACK; }   /* (STEP+ = SELECT held in STEPS) */
                             else { seq_back = page; np = PG_SEQ; seq_view = SV_TRACKS; }
                             if (seq_view == SV_SLOTS) slot_sel = pat_queue ? pat_queue - 1u : set.pat;
                             say(HINT[seq_view]);
@@ -1840,8 +2079,10 @@ static void app_main(void)
                         else if (LL[k] == L_EDIT) np = cycle_page(PG_OSC1, 5);
                         else if (LL[k] == L_FX) np = cycle_page(PG_CHORUS, 4);
                         else if (LL[k] == L_GLO) np = page == PG_GLOBAL ? PG_VOICE : page == PG_VOICE ? PG_OUTPUT : PG_GLOBAL;
-                        else if (is_seq_page(page)) {   /* in the sequencer: PATTERNS; there, save in the slot */
-                            pat_save_to(set.pat);   /* (as zp12: SAVE saves now; playing, at the stop) */
+                        else if (is_seq_page(page)) {   /* in the sequencer: SAVE PATTERN? - SAVE again saves (as zp12:
+                                                 * now; playing, at the stop), anything else: no */
+                            if (pat_save_armed && fm1_ms - pat_save_t < 3000u) { pat_save_armed = 0; pat_save_to(set.pat); }
+                            else { static char m[24]; pat_save_armed = 1; pat_save_t = fm1_ms; m[0] = 0; scat(m, "SAVE PATTERN "); fmt_u(m + slen(m), set.pat + 1u); scat(m, "? " NM_SAVE); say(m); }
                             entry_reset();
                         } else if (save_armed) {      /* SAVE tapped twice: into the slot (PRESETS in between: another) */
                             uint32_t n = save_to % NPROG, t = seq_trk % NTRK, u;
@@ -1891,6 +2132,11 @@ static void app_main(void)
         if (b & (1u << BTN_HOME)) {             /* HOME: PERFORM; while a layer is held: lock it open; locked: let it go */
             if (layer && !layer_lock) { layer_lock = 1; layer_used = 1; say("LOCKED: ITS BUTTON ENDS IT"); }
             else if (layer_lock) { layer = L_NONE; layer_lock = 0; dirty_page = dirty_steps = dirty_tags = 1; leds_q = 0xFFFFFFFFu; }
+            else if (page == PG_PERFORM) { np = PG_MIXER; mix_row = 0; }   /* again: the MIXER (VIBE's F1) */
+            else if (page == PG_MIXER) {        /* there: its next row */
+                static const char *const MR[7] = {"LEVEL", "PAN", "SEND CHORUS", "SEND DELAY", "SEND REVERB", "SEND DRIVE", "MASTER"};
+                mix_row = (mix_row + 1u) % 7u; say(MR[mix_row]); dirty_page = dirty_steps = 1;
+            }
             else np = PG_PERFORM;
         }
         if (b & ((1u << BTN_ENV) | (1u << BTN_LFO) | (1u << BTN_ARP)) && layer_lock) {   /* (another button lets a lock go) */
@@ -1958,11 +2204,7 @@ static void app_main(void)
         }
 
         /* encoders */
-        if ((e = fm1_enc_take(ENC_PRESETS)) != 0 && is_seq_page(page) && seq_view != SV_TRACKS) {   /* in the sequencer: the pattern (as zp12) */
-            uint32_t from = pat_queue ? pat_queue - 1u : set.pat;
-            pat_go((uint32_t)clampi((int32_t)from + (e > 0 ? 1 : -1), 0, NPAT - 1));
-            dirty_hdr = dirty_page = dirty_steps = 1;
-        } else if (e && save_armed) {           /* SAVE armed: PRESETS picks the slot to save into ("save as") */
+        if ((e = fm1_enc_take(ENC_PRESETS)) != 0 && save_armed) {           /* SAVE armed: PRESETS picks the slot to save into ("save as") */
             save_to = (uint32_t)((int32_t)save_to + e + (int32_t)NPROG * 4) % NPROG;
             save_t = fm1_ms;
             dirty_hdr = 1;
@@ -1970,27 +2212,32 @@ static void app_main(void)
             trk_load(seq_trk, (uint32_t)((int32_t)trk_prog[seq_trk % NTRK] + e + (int32_t)NPROG * 4) % NPROG);
             dirty_hdr = dirty_page = dirty_tags = dirty_steps = 1;
         }
-        if (vibe_pat_steps) {                   /* (VIBE) DATA in MIXER / TRACKS: the pattern, as in TRACK and PATTERNS */
-            int32_t s2 = vibe_pat_steps; vibe_pat_steps = 0;
-            uint32_t from = pat_queue ? pat_queue - 1u : set.pat;
-            pat_go((uint32_t)(((int32_t)from + s2 % (int32_t)NPAT + (int32_t)NPAT) % (int32_t)NPAT));
-            dirty_hdr = dirty_page = dirty_steps = 1;
-        }
-        if (vibe_snd_steps) {                   /* (VIBE) the chosen track's sound, wherever we are */
-            int32_t s2 = vibe_snd_steps; vibe_snd_steps = 0;
-            trk_load(seq_trk, (uint32_t)((int32_t)trk_prog[seq_trk % NTRK] + s2 + (int32_t)NPROG * 4) % NPROG);
-            dirty_hdr = dirty_page = dirty_tags = dirty_steps = 1;
-        }
         if ((e = fm1_enc_take(ENC_ALGORITHM)) != 0) {   /* ALGORITHM: the track A-D (as sloopDX) */
             trk_select((uint32_t)clampi((int32_t)seq_trk + (e > 0 ? 1 : -1), 0, NTRK - 1));
         }
-        if ((e = fm1_enc_take(ENC_SELECT)) != 0) {   /* SELECT: the tempo, always */
+        if ((e = fm1_enc_take(ENC_SELECT)) != 0) {   /* SELECT (VIBE's DATA): STEPS the bar, the sequencer's other views and
+                                                 * the MIXER the next pattern (on the bar), else the tempo */
             static char msg[16];
-            set.tempo = (uint8_t)clampi(set.tempo + e, 40, 240); ctl_tempo = set.tempo;
-            set_dirty = 1; set_t = fm1_ms;
-            msg[0] = 0; scat(msg, "TEMPO "); fmt_u(msg + slen(msg), set.tempo);
-            say(msg);
-            dirty_page |= page == PG_GLOBAL;
+            uint32_t t = seq_trk % NTRK, len = pat.trk[t].len;
+            if (is_seq_page(page) && SV_ENTRY(seq_view) && !layer) {
+                if (len) {
+                    int32_t c = (int32_t)(seq_cur[t] % len) + (e > 0 ? 16 : -16);
+                    seq_cursor_set(t, (uint32_t)(c < 0 ? (c + (int32_t)len * 16) % (int32_t)len : c % (int32_t)len));
+                    msg[0] = 0; scat(msg, "BAR "); fmt_u(msg + slen(msg), seq_cur[t] / 16u + 1u); scat(msg, " OF "); fmt_u(msg + slen(msg), seq_pages(t));
+                    say(msg);
+                }
+                dirty_steps = dirty_page = 1;
+            } else if ((is_seq_page(page) || page == PG_MIXER) && !layer) {
+                uint32_t from = pat_queue ? pat_queue - 1u : set.pat;
+                pat_go((from + (e > 0 ? 1u : NPAT - 1u)) % NPAT);
+                dirty_hdr = dirty_page = dirty_steps = 1;
+            } else {
+                set.tempo = (uint8_t)clampi(set.tempo + e, 40, 240); ctl_tempo = set.tempo;
+                set_dirty = 1; set_t = fm1_ms;
+                msg[0] = 0; scat(msg, "TEMPO "); fmt_u(msg + slen(msg), set.tempo);
+                say(msg);
+                dirty_page |= page == PG_GLOBAL;
+            }
         }
         for (k = 0; k < 4u; k++) {
             int32_t p = PAGE[page].p[k];
@@ -2038,6 +2285,7 @@ static void app_main(void)
             } else if (p >= 0) {
                 int32_t step = PDEF[p].max >= 100 ? 2 : 1;
                 set_param((uint32_t)p, (int32_t)ed_patch((uint32_t)p)->v[p] + e * step);
+                auto_rec((uint32_t)p);
                 if (p == P_MODE || p == P_FTYPE || p == P_ARP_MODE || p >= P_CHO_RATE) dirty_tags = 1;
                 dirty_hdr = 1;
             }
@@ -2049,7 +2297,7 @@ static void app_main(void)
         smk_wheels();
 #endif
         midi_in(0);
-        if (ctl_ext_quarter && fm1_ms - clk_last > 2000u) { ctl_ext_quarter = 0; clk_n = 0; }
+        if (ctl_ext_quarter && fm1_ms - clk_last > 1000u) { ctl_ext_quarter = 0; clk_n = 0; }   /* (the clock stopped: our own tempo) */
 
         /* LEDs: the keys that sound, the lit buttons; in the step view the white keys are the steps (glowing: a note
          * there, bright: playing now or held) and the black keys their functions (bright: on, glowing: available) */
@@ -2070,11 +2318,13 @@ static void app_main(void)
                     if ((uint32_t)KEY_PAGE[k] == seq_pg[t]) lit |= 1u << k; else glow |= 1u << k;
                 }
             }
-        } else if (layer == L_GLO) {            /* 1-4 lit: muted; 5-8 lit: solo; G5 on the beat */
+        } else if (layer == L_GLO) {            /* 1-4 lit: playing (blinking: on the bar); 5-8 muted; 9-12 solo; G5 the beat */
             static const uint8_t WK[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};
             for (k = 0; k < NTRK; k++) {
-                if (set.mix_mute >> k & 1u) lit |= 1u << WK[k]; else glow |= 1u << WK[k];
-                if (set.mix_solo >> k & 1u) lit |= 1u << WK[4u + k]; else glow |= 1u << WK[4u + k];
+                uint32_t on = ctl_seq_run && (ctl_trk_on >> k & 1u) && pat.trk[k].len, pend = trk_pending() >> k & 1u;
+                if (pend ? (fm1_ms / 150u) & 1u : on) lit |= 1u << WK[k]; else glow |= 1u << WK[k];
+                if (set.mix_mute >> k & 1u) lit |= 1u << WK[4u + k]; else glow |= 1u << WK[4u + k];
+                if (set.mix_solo >> k & 1u) lit |= 1u << WK[8u + k]; else glow |= 1u << WK[8u + k];
             }
             if (fm1_ms - beat_t < 90u && ctl_seq_run) lit |= 1u << WK[15]; else glow |= 1u << WK[15];
         } else if (layer == L_SAVE) {           /* the pattern now lit, the others glow */
@@ -2188,7 +2438,7 @@ static void app_main(void)
                     meter[t] = (uint8_t)(m > meter[t] ? m : meter[t] > 2u ? meter[t] - 2u : 0u);
                 }
             }
-            for (t = 0; t < NTRK; t++) { st[t] = trk_state(t); mk = mk * 7u + st[t] + set.mix_lvl[t] * 5u + meter[t] * 131u; }
+            for (t = 0; t < NTRK; t++) { st[t] = pat.trk[t].len ? trk_state(t) : 4u; mk = mk * 7u + st[t] + set.mix_lvl[t] * 5u + meter[t] * 131u; }
             if ((dirty_steps || mk != mix_key) && fm1_ms - t_steps >= 30u) {
                 dirty_steps = 0; t_steps = fm1_ms; mix_key = mk;
                 ui_mix_strip(set.mix_lvl, set.mix_mute, set.mix_solo, st, seq_trk, blink, meter);
@@ -2243,50 +2493,82 @@ static void app_main(void)
             if (!pat_edit_t) pat_edit_t = fm1_ms | 1u;
             else if (fm1_ms - pat_edit_t > 3000u && !ctl_seq_run && !rec && step_held < 0 && !entry_n && !layer) pat_dirty = 1;
         }
-        if (ui_pat_swapped != swap_seen) {      /* the ISR swapped the next pattern in (track A from the top) */
+        if (ui_pat_swapped != swap_seen) {      /* the ISR swapped the next pattern in on the downbeat, its sounds and mix too */
             static char msg[16];
+            uint32_t left = set.pat, t;
             swap_seen = ui_pat_swapped;
-            if (pat_edited && ctl_pat_keep) {   /* (VIBE) the one left: kept with its edits, saved at the stop */
-                pcache[set.pat] = pat_old; pc_valid |= 1u << set.pat; pc_dirty |= 1u << set.pat;
+            RING_TAKE();
+            {   /* the one left keeps its instruments as they sounded to the end, and its mixer */
+                psnd_t *ps = &psnd[left];
+                ps->magic = PSN2_MAGIC;
+                for (t = 0; t < NTRK; t++) {
+                    if (ui_snd_swapped) ps->p[t] = snd_old[t];
+                    ps->prog[t] = (uint8_t)trk_prog[t]; ps->edited[t] = (uint8_t)trk_edited[t];
+                }
+                mx_from_set(&ps->mx);
+                ui_snd_swapped = 0;
             }
+            if (pat_edited && ctl_pat_keep) pend_slot = left + 1u;   /* (its edits in pat_old, saved at the stop) */
             set.pat = (uint8_t)(pat_queue ? pat_queue - 1u : set.pat);
+            snd_meta(set.pat);
             pat_queue = 0;
             memset(seq_cur, 0, sizeof seq_cur); memset(seq_pg, 0, sizeof seq_pg);
-            pat_edited = 0; pat_edit_t = 0; slot_sel = set.pat;
+            pat_edited = q_edited; pat_edit_t = 0; slot_sel = set.pat; q_edited = 0;
             set_dirty = 1; set_t = fm1_ms;
             msg[0] = 0; scat(msg, "PATTERN "); fmt_u(msg + slen(msg), set.pat + 1u);
             say(msg);
-            dirty_page = dirty_steps = dirty_hdr = 1;
+            dirty_page = dirty_steps = dirty_hdr = dirty_tags = 1;
         }
-        if (pat_queue && !ctl_seq_run) {        /* stopped before the loop's end: now */
+        if (pat_queue && !ctl_seq_run) {        /* stopped before the bar: now */
             uint32_t n = pat_queue - 1u;
-            ctl_pat_swap = 0; pat_queue = 0;
+            ctl_pat_swap = 0; ctl_snd_swap = 0; ctl_mx_swap = 0; pat_queue = 0;
             pat_switch(n);
             dirty_page = dirty_steps = dirty_hdr = 1;
         }
-        if ((pat_dirty || pend_slot || pc_dirty || copy_to) && !ctl_seq_run && engine_quiet()) {
+        if (!pat_queue && fm1_ms - snd_t > 1500u) {   /* the sounds now changed (a program, a knob, the mix): this pattern's set follows */
+            snd_t = fm1_ms;
+            if (snd_changed(set.pat)) snd_capture(set.pat);
+        }
+        if ((pat_dirty || pend_slot || copy_to || snd_dirty) && !ctl_seq_run && engine_quiet()
+            && (pat_dirty || pend_slot || copy_to || (fm1_ms - snd_chg_t > 3000u && step_held < 0 && !entry_n && !layer))) {   /* (an erase stalls the sound: stopped and quiet) */
             static char msg[20];
             uint32_t k;
-            for (k = 0; k < NPAT; k++)          /* (VIBE) the patterns left with edits */
-                if (pc_dirty >> k & 1u) { if (!blob_save(k, &pcache[k], sizeof pcache[k])) slot_saved(k, &pcache[k]); pc_dirty &= ~(1u << k); }
-            if (pend_slot) {
-                if (!blob_save(pend_slot - 1u, &pat_old, sizeof pat_old)) slot_saved(pend_slot - 1u, &pat_old);
+            if (pend_slot) {                    /* the pattern left while playing, with its edits */
+                uint32_t n = pend_slot - 1u;
+                if (!slot_save(n, &pat_old, sizeof pat_old, &psnd[n], sizeof psnd[n])) slot_saved(n, &pat_old);
                 pend_slot = 0;
             }
             if (pat_dirty) {
-                int bad = blob_save(set.pat, &pat, sizeof pat);
+                int bad;
+                if (snd_changed(set.pat)) snd_capture(set.pat);
+                bad = slot_save(set.pat, &pat, sizeof pat, &psnd[set.pat], sizeof psnd[set.pat]);
                 if (!bad) slot_saved(set.pat, &pat);
-                pcache[set.pat] = pat; pc_valid |= 1u << set.pat; pc_dirty &= ~(1u << set.pat);   /* (VIBE) */
-                if (pat_save_say) {                 /* (by itself, or before a load: no message) */ msg[0] = 0; scat(msg, bad ? "SAVE FAILED " : "SAVED IN "); fmt_u(msg + slen(msg), set.pat + 1u); say(msg); }
+                if (pat_save_say) {             /* (by itself, or before a load: no message) */
+                    msg[0] = 0; scat(msg, bad ? "SAVE FAILED " : "SAVED IN "); fmt_u(msg + slen(msg), set.pat + 1u); say(msg);
+                }
                 pat_dirty = pat_edited = pat_save_say = 0;
                 pat_edit_t = 0;
             }
-            if (copy_to) {
-                int bad = blob_save(copy_to - 1u, &pat, sizeof pat);
-                if (!bad) slot_saved(copy_to - 1u, &pat);
-                pcache[copy_to - 1u] = pat; pc_valid |= 1u << (copy_to - 1u); pc_dirty &= ~(1u << (copy_to - 1u));   /* (VIBE) */
+            if (copy_to) {                      /* this pattern with its sounds into another slot */
+                uint32_t n = copy_to - 1u;
+                int bad;
+                if (snd_changed(set.pat)) snd_capture(set.pat);
+                psnd[n] = psnd[set.pat];
+                bad = slot_save(n, &pat, sizeof pat, &psnd[n], sizeof psnd[n]);
+                if (!bad) slot_saved(n, &pat);
                 msg[0] = 0; scat(msg, bad ? "COPY FAILED " : "COPIED TO "); fmt_u(msg + slen(msg), copy_to); say(msg);
                 copy_to = 0;
+            }
+            for (k = 0; k < NPAT && snd_dirty; k++) {   /* a pattern whose sounds alone changed: its slot again */
+                if (!(snd_dirty >> k & 1u)) continue;
+                if (!(pat_used >> k & 1u) && !(k == set.pat && pat_edited)) { snd_dirty &= ~(1u << k); continue; }   /* (an empty one: in RAM) */
+                if (k == set.pat) {
+                    if (!slot_save(k, &pat, sizeof pat, &psnd[k], sizeof psnd[k])) { slot_saved(k, &pat); pat_edited = pat_dirty = 0; pat_edit_t = 0; }
+                } else {
+                    pat_fetch(k, &pat_q);       /* (stopped: pat_q is free) */
+                    if (!slot_save(k, &pat_q, sizeof pat_q, &psnd[k], sizeof psnd[k])) slot_saved(k, &pat_q);
+                }
+                snd_dirty &= ~(1u << k);
             }
             dirty_page = dirty_steps = dirty_hdr = 1;
         }

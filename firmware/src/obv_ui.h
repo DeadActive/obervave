@@ -444,15 +444,15 @@ static void ui_seq_track_row(uint32_t t, uint32_t sel, const char *title, uint16
 static void ui_mix_strip(const uint8_t *lvl, uint32_t mute, uint32_t solo, const uint32_t *state, uint32_t sel, uint32_t blink,
                          const uint8_t *meter)   /* (VIBE) meter: what each track plays now, 0..44 px */
 {
-    static const char *const ST[4] = {"STOP", "PLAY", "NEXT", "ENDS"};
+    static const char *const ST[5] = {"STOP", "PLAY", "NEXT", "ENDS", "OFF"};
     uint32_t t;
     cv_begin(240, 94, C_PANEL);
     for (t = 0; t < 4u; t++) {
         int32_t x = (int32_t)t * 60 + 3, h = (int32_t)lvl[t] * 44 / 127;
         uint16_t c = C_TRKC[t], dim = blend565(C_PANEL, c, 90);
         char tl[2] = {(char)('A' + t), 0};
-        const char *st = ST[state[t] & 3u];
-        uint16_t stc = state[t] == 1u ? C_GREEN : state[t] >= 2u ? (blink ? C_AMBER : C_DIMT) : C_DIMT;
+        const char *st = ST[state[t] > 4u ? 4u : state[t]];   /* (4: no length, off) */
+        uint16_t stc = state[t] == 1u ? C_GREEN : state[t] == 2u || state[t] == 3u ? (blink ? C_AMBER : C_DIMT) : C_DIMT;
         if (t == sel) { cv_rect(x - 2, 0, 58, 1, c); cv_rect(x - 2, 93, 58, 1, c); cv_rect(x - 2, 0, 1, 94, c); cv_rect(x + 55, 0, 1, 94, c); }
         cv_rect(x + 2, 4, 18, 18, c);
         cv_text(x + 11 - text_w(&FONT_S, tl) / 2, 5, &FONT_S, tl, C_PANEL);

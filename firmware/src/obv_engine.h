@@ -1,10 +1,14 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* The engine (VIBE edition): 32 voices for four sounds (one per track) in the audio ISR. The main loop sends note events through a ring and writes the live
- * patch and the controllers; the ISR owns the voices, the held-note list, the arpeggiator and the sustain. */
-#ifndef RING_PUBLISH
+/* The engine: 8 voices for four sounds (one per track) in the audio ISR, as the originals' eight voice cards. The main
+ * loop sends note events through a ring and writes the live patches and the controllers; the ISR owns the voices, the
+ * held-note lists, the arpeggiators and the sustain. */
+#ifndef RING_PUBLISH                            /* (one core: the ISR runs whole between two main-loop instructions) */
 #define RING_PUBLISH() __asm__ volatile("" ::: "memory")
 #endif
-#define NV 32u
+#ifndef RING_TAKE
+#define RING_TAKE() __asm__ volatile("" ::: "memory")
+#endif
+#define NV 8u
 #define NPART 4u                               /* the four tracks' sounds */
 #define NCARD 8u                                /* the originals' voice cards: the tables below, the LEDs */
 #define NHELD 16u
@@ -31,6 +35,7 @@ typedef struct {
     uint32_t seq;                               /* allocation order */
     uint8_t note, vel, gate;                    /* gate: the key (or the arp) holds it */
     uint8_t part;                               /* the track whose sound it is, 0..3 */
+    uint8_t grp;                                /* a card of its sound's MONO / UNISON group */
 } voice_t;
 
 /* four sounds, one per track (A's also sets the effects). The main loop writes, the ISR reads. */
@@ -42,6 +47,12 @@ static volatile uint8_t ctl_mix_cho[NPART] = {127, 127, 127, 127}, ctl_mix_dly[N
 static volatile int8_t ctl_mix_pan[NPART];
 static volatile uint8_t ctl_mix_drv[NPART];   /* (VIBE) the 4th send: DRIVE */
 static volatile uint32_t ctl_mix_off;           /* bit t: track t silent (muted, or another one soloed) */
+/* the next pattern's mixer, drive and master, prepared by the main loop with the pattern (pat_q), taken by the ISR on
+ * the downbeat it swaps the pattern in: the mix changes with the first note, not a frame later */
+typedef struct { uint8_t lvl[NPART], cho[NPART], dly[NPART], rev[NPART], drv[NPART]; int8_t pan[NPART]; uint32_t off;
+                 uint8_t dv_type, dv_amt, dv_tone, dv_mix, m_vol, m_dj, m_drive, m_comp; } mxq_t;
+static mxq_t mx_q;
+static volatile uint32_t ctl_mx_swap;
 static voice_t vc[NV];
 static uint32_t vseq, rr;                       /* allocation counter, round-robin pointer */
 
@@ -139,67 +150,100 @@ static void voice_start(voice_t *v, uint32_t part, uint32_t note, uint32_t vel, 
     voice_pan(v, pan);
 }
 
-/* the cards of a part's MONO / UNISON group: its own eight (A 1-8, B 9-16, C 17-24, D 25-32) */
-static void part_cards(uint32_t part, uint32_t *lo, uint32_t *n)
-{
-    *lo = (part % NPART) * (NV / NPART);
-    *n = NV / NPART;
-}
 static int part_grouped(uint32_t part)
 {
     uint32_t m = pt[part].p->v[P_MODE];
     return m == M_MONO || m == M_UNISON;
 }
 
-/* round robin over the cards; steal the oldest released, then the oldest. The polyphonic sounds share the 32,
- * except the eight of each other sound that is a MONO / UNISON group */
+/* the eight cards are shared by the four sounds. POLY / DUAL: round robin over the cards; steal the oldest released,
+ * then the oldest. A card that sounds in another sound's MONO / UNISON group is kept (a held bass or lead is never
+ * cut by a chord); only if nothing else is left */
 static uint32_t voice_alloc(uint32_t part)
 {
-    uint32_t i, v, q, pick = 0xFFFFFFFFu, best = 0xFFFFFFFFu, keep = 0;   /* keep: bit q, group q's cards */
-    for (q = 0; q < NPART; q++)
-        if (q != part && part_grouped(q)) keep |= 1u << q;
-#define FREE_CARD(v) (!(keep >> ((v) / (NV / NPART)) & 1u))
+    uint32_t i, v, pick = 0xFFFFFFFFu, best = 0xFFFFFFFFu;
+#define KEPT(v) (vc[v].grp && vc[v].gate && vc[v].part != part)
     for (i = 0; i < NV; i++) {
         v = (rr + i) % NV;
-        if (FREE_CARD(v) && vc[v].ae.stage == E_IDLE) { rr = v + 1u; return v; }
+        if (vc[v].ae.stage == E_IDLE && !KEPT(v)) { rr = v + 1u; return v; }
     }
     for (v = 0; v < NV; v++)
-        if (FREE_CARD(v) && !vc[v].gate && vc[v].seq < best) { best = vc[v].seq; pick = v; }
+        if (!KEPT(v) && !vc[v].gate && vc[v].seq < best) { best = vc[v].seq; pick = v; }
     if (best == 0xFFFFFFFFu)
         for (v = 0; v < NV; v++)
-            if (FREE_CARD(v) && vc[v].seq < best) { best = vc[v].seq; pick = v; }
-#undef FREE_CARD
-    if (pick == 0xFFFFFFFFu) pick = (part % NPART) * (NV / NPART);   /* (every other sound a group: its own eight) */
+            if (!KEPT(v) && vc[v].seq < best) { best = vc[v].seq; pick = v; }
+    if (pick == 0xFFFFFFFFu)                    /* (every card held by another group: the oldest anyway) */
+        for (v = 0; v < NV; v++)
+            if (vc[v].seq < best) { best = vc[v].seq; pick = v; }
+#undef KEPT
     rr = pick + 1u;
     return pick;
 }
 
+/* a MONO / UNISON group: n cards for one note. Its own cards first, then idle ones, then released, then the oldest
+ * POLY ones; another group's sounding cards last. Returns them in g[] (its order: the detune / pan spread) */
+static void group_pick(uint32_t part, uint32_t n, uint8_t *g)
+{
+    uint32_t i, v, taken = 0;
+    for (i = 0; i < n; i++) {
+        uint32_t best = 0xFFFFFFFFu, pick = 0, score, bs = 0xFFFFFFFFu;
+        for (v = 0; v < NV; v++) {
+            if (taken >> v & 1u) continue;
+            if (vc[v].part == part && vc[v].grp) score = 0;
+            else if (vc[v].ae.stage == E_IDLE && !vc[v].gate) score = 1;
+            else if (!vc[v].gate) score = 2;
+            else if (!vc[v].grp) score = 3;
+            else score = 4;
+            if (score < bs || (score == bs && vc[v].seq < best)) { bs = score; best = vc[v].seq; pick = v; }
+        }
+        taken |= 1u << pick;
+        g[i] = (uint8_t)pick;
+    }
+}
+
 static uint32_t uni_count(uint32_t part)
 {
-    uint32_t m = pt[part].p->v[P_MODE], lo, n;
-    part_cards(part, &lo, &n);
-    return m == M_MONO ? 1u : m == M_UNISON ? clampi(pt[part].p->v[P_UNI_N], 1, (int32_t)n) : 0u;
+    uint32_t m = pt[part].p->v[P_MODE];
+    return m == M_MONO ? 1u : m == M_UNISON ? (uint32_t)clampi(pt[part].p->v[P_UNI_N], 1, (int32_t)NV) : 0u;
 }
+static uint8_t grp_v[NPART][NV];                /* each sound's group: its cards, in spread order */
+static uint32_t grp_n[NPART];
 
 static void voice_trigger(uint32_t part, uint32_t note, uint32_t vel)
 {
     const uint8_t *pv = pt[part].p->v;
-    uint32_t mode = pv[P_MODE], n, i, lo, gn, legato = 0;
+    uint32_t mode = pv[P_MODE], n, i, legato = 0;
     int32_t det = (pv[P_UNI_DET] * pv[P_UNI_DET]) >> 6, spread = pv[P_SPREAD];
     if (mode == M_POLY) {
         uint32_t v = voice_alloc(part);
         voice_start(&vc[v], part, note, vel, 0, (PAN_CARD[v % NCARD] * spread) >> 7);
+        vc[v].grp = 0;
     } else if (mode == M_DUAL) {
-        uint32_t a = voice_alloc(part), b = voice_alloc(part);
+        uint32_t a = voice_alloc(part), b;
         voice_start(&vc[a], part, note, vel, -det / 2, (-48 * spread) >> 7);
+        vc[a].grp = 0;
+        b = voice_alloc(part);
         voice_start(&vc[b], part, note, vel, det / 2, (48 * spread) >> 7);
+        vc[b].grp = 0;
     } else {
         n = uni_count(part);
-        part_cards(part, &lo, &gn);
-        for (i = 0; i < n; i++)
-            if (vc[lo + i].gate && vc[lo + i].part == part) legato = 1;
+        if (grp_n[part] == n) {                 /* a key still down in the group (all its cards still its own): legato */
+            uint32_t own = 1;
+            for (i = 0; i < n; i++) {
+                const voice_t *w = &vc[grp_v[part][i]];
+                if (w->part != part || !w->grp) own = 0;
+                else if (w->gate) legato = 1;
+            }
+            legato &= own;
+        }
+        if (!legato) {
+            for (i = 0; i < grp_n[part]; i++)   /* (the cards it had and gives up fall silent) */
+                if (vc[grp_v[part][i]].part == part && vc[grp_v[part][i]].grp) vc[grp_v[part][i]].gate = 0;
+            group_pick(part, n, grp_v[part]);
+            grp_n[part] = n;
+        }
         for (i = 0; i < n; i++) {
-            voice_t *v = &vc[lo + i];
+            voice_t *v = &vc[grp_v[part][i]];
             int32_t d = n > 1 ? (det * (int32_t)(2u * i) / (int32_t)(n - 1u)) - det : 0;
             int32_t pan = n > 1 ? ((int32_t)(128u * i) / (int32_t)(n - 1u) - 64) * spread >> 7 : 0;
             if (legato) {                       /* a key still down: slide, no retrigger */
@@ -211,9 +255,8 @@ static void voice_trigger(uint32_t part, uint32_t note, uint32_t vel)
                 voice_pan(v, pan);
             } else
                 voice_start(v, part, note, vel, d, pan);
+            v->grp = 1;
         }
-        for (i = n; i < gn; i++)                /* the cards beyond the group fall silent */
-            vc[lo + i].gate = 0;
     }
     pt[part].last_pitch16 = (int32_t)note << 16;
     if (pv[P_LFO_PHASE] == LP_SYNC && !legato) {
@@ -229,15 +272,17 @@ static void voice_release(uint32_t part, uint32_t note, uint32_t from_arp)
     const uint8_t *pv = pt[part].p->v;
     uint32_t v, mode = pv[P_MODE];
     if ((mode == M_MONO || mode == M_UNISON) && !from_arp && nheld[part] && pv[P_ARP_MODE] == A_OFF) {
-        uint32_t n = uni_count(part), i, lo, gn;
-        part_cards(part, &lo, &gn);
-        if (vc[lo].gate && vc[lo].part == part && vc[lo].note == note) {
+        uint32_t n = grp_n[part], i;
+        voice_t *v0 = &vc[grp_v[part][0]];
+        if (n && v0->gate && v0->part == part && v0->grp && v0->note == note) {
             for (i = 0; i < n; i++) {
-                vc[lo + i].note = held[part][nheld[part] - 1u].note;
-                vc[lo + i].target16 = (int32_t)vc[lo + i].note << 16;
-                if (!pv[P_GLIDE]) vc[lo + i].pitch16 = vc[lo + i].target16;
+                voice_t *w = &vc[grp_v[part][i]];
+                if (w->part != part || !w->grp) continue;   /* (a card another sound took meanwhile) */
+                w->note = held[part][nheld[part] - 1u].note;
+                w->target16 = (int32_t)w->note << 16;
+                if (!pv[P_GLIDE]) w->pitch16 = w->target16;
             }
-            pt[part].last_pitch16 = vc[lo].target16;
+            pt[part].last_pitch16 = v0->target16;
         }
         return;
     }
@@ -258,6 +303,7 @@ static void voices_release_part(uint32_t part)
 }
 
 static int seq_phase(uint32_t *ph);             /* the sequencer (its file): running, and where in the beat (frames) */
+static int seq_starting(void);                  /* the transport starts (or starts over) in this block */
 static void seq_tick(void);                     /* the step sequencer (obv_seq.h): per block, after the arp */
 
 /* the click (main: ctl_click on / off) and a one-bar count-in before a recording (main: ctl_count) */
@@ -275,19 +321,34 @@ static void click_start(uint32_t accent)        /* beat 1 higher and louder */
 typedef struct { uint32_t cnt, period, gate_at, pos, dir, sounding, note, was_on; } arp_t;
 static arp_t arp[NPART];
 
-/* ISR -> main loop: the notes the arps play (REC records them, not the keys that feed them): on, note, part, velocity */
-#define AQ 32u
-static uint8_t arp_q[AQ][4];
+/* ISR -> main loop: the notes the arps play (REC records them, not the keys that feed them), each with the key's
+ * velocity and where its track was when it played (step * 256 + how far into it): REC puts it exactly there, however
+ * late the main loop takes it */
+#define AQ 64u
+typedef struct { uint8_t on, note, part, vel; uint32_t q8; } arpev_t;
+static arpev_t arp_q[AQ];
 static volatile uint32_t arp_qw, arp_qr;
+static uint32_t seq_q8_now(uint32_t t);         /* (obv_seq.h) where track t is in this block, 0xFFFFFFFF: not running */
 static void arp_post(uint32_t p, uint32_t on, uint32_t note, uint32_t vel)
 {
+    arpev_t *e;
     if (arp_qw - arp_qr >= AQ) return;
-    arp_q[arp_qw % AQ][0] = (uint8_t)on;
-    arp_q[arp_qw % AQ][1] = (uint8_t)note;
-    arp_q[arp_qw % AQ][2] = (uint8_t)p;
-    arp_q[arp_qw % AQ][3] = (uint8_t)vel;   /* (VIBE: the key's velocity, recorded with the note) */
+    e = &arp_q[arp_qw % AQ];
+    e->on = (uint8_t)on; e->note = (uint8_t)note; e->part = (uint8_t)p; e->vel = (uint8_t)vel;
+    e->q8 = seq_q8_now(p);
     RING_PUBLISH();
     arp_qw++;
+}
+
+static volatile uint32_t eng_t;                 /* frames the engine has made (the MIDI clock is measured in them) */
+
+/* a quarter in frames. The internal tempo rounded to 48 frames (~1 ms): the beat (counted in blocks of CTL) and every
+ * step length (q / 1, 2, 3, 4, 6, 8, 12) come out whole, so the arp, the tracks and the bar stay locked forever (else
+ * at 121 BPM the tracks slid off the beat). The tempo is off by at most 0.1 % for it. */
+static uint32_t quarter_len(void)
+{
+    if (ctl_ext_quarter) return ctl_ext_quarter;
+    return (60u * FS / (uint32_t)clampi((int32_t)ctl_tempo, 40, 240) + 24u) / 48u * 48u;
 }
 
 static void arp_stop_note(uint32_t p)
@@ -342,14 +403,20 @@ static void arp_tick(uint32_t p)
     }
     if (!a->was_on) { voices_release_part(p); a->was_on = 1; a->pos = 0; a->cnt = 0xFFFFFFFFu; }
     if (!nheld[p]) { arp_stop_note(p); a->pos = 0; a->cnt = 0xFFFFFFFFu; return; }
-    q = ctl_ext_quarter ? ctl_ext_quarter : 60u * FS / clampi(ctl_tempo, 40, 240);
+    q = quarter_len();
     a->period = q / div;
     if (a->period < CTL) a->period = CTL;
     a->gate_at = (a->period * (pv[P_ARP_GATE] + 1u)) >> 7;
     {                                           /* the transport running: on its grid (the first key: at once if just
                                                  * after a line, else on the next one), as a DAW's arp */
         uint32_t ph;
+        if (seq_starting()) {                   /* the transport starts in this block: the downbeat */
+            if (a->sounding && a->cnt != 0xFFFFFFFFu && a->cnt < a->period / 4u) { a->cnt = 0; return; }   /* (its note
+                                                 * just came, e.g. the one that started REC: it is the downbeat's) */
+            a->cnt = 0; arp_stop_note(p); arp_step(p); return;
+        }
         if (seq_phase(&ph)) {
+            if (ph / a->period >= div) return;  /* (the last sliver of a beat: its line is the next beat's start) */
             ph %= a->period;
             if (ph < CTL || (a->cnt == 0xFFFFFFFFu && ph < a->period / 4u)) { a->cnt = ph; arp_stop_note(p); arp_step(p); return; }
             if (a->cnt == 0xFFFFFFFFu) return;  /* (waiting for the line) */
@@ -434,7 +501,9 @@ static void engine_events(void)
         if ((sus_was & ~sus) >> p & 1u) ev_sustain_up(p);
     sus_was = sus;
     while (nq_r != nq_w) {
-        nev_t e = nq[nq_r % NQ];
+        nev_t e;
+        RING_TAKE();
+        e = nq[nq_r % NQ];
         p = e.part % NPART;
         nq_r++;
         if (e.type) ev_note_on(p, e.note, e.vel);
@@ -673,13 +742,14 @@ static void engine_audio(int32_t *out, uint32_t n)
     uint32_t b, v, i, p, used = 0;
     static int32_t sc_prev;
     static uint32_t sc_i, sc_sub;
-    fx_block(&live, ctl_ext_quarter ? ctl_ext_quarter : 60u * FS / clampi(ctl_tempo, 40, 240));
+    fx_block(&live, quarter_len());
     vol_q12 = (int32_t)((ctl_cc7 * ctl_cc7) >> 2);
     for (p = 0; p < NPART; p++)
         for (i = 0; i < 2u * n; i++) bus[p][i] = 0;
     for (i = 0; i < n; i++) snd_c[i] = snd_d[i] = snd_r[i] = snd_v[i] = 0;
     for (b = 0; b < n; b += CTL) {
         engine_events();
+        eng_t += CTL;
         if (ctl_arp_restart) { ctl_arp_restart = 0; for (p = 0; p < NPART; p++) { arp[p].pos = 0; arp[p].cnt = 0xFFFFFFFFu; } }
         for (p = 0; p < NPART; p++) arp_tick(p);
         seq_tick();                             /* (may swap the pattern in) */
@@ -742,6 +812,7 @@ static void engine_audio(int32_t *out, uint32_t n)
     }
     fx_process(out, snd_c, snd_d, snd_r, n);
     drive_process(out, snd_v, n);
+    master_process(out, n);
     for (i = 0; i < n && click_amp; i++) {     /* the click: after the effects, never recorded */
         int32_t c;
         click_ph += click_inc;
