@@ -16,7 +16,46 @@
  * Integers only (no FPU, no 64-bit division); tests/host.c runs this on a computer. */
 static void app_idle(void);
 #define LCD_IDLE() app_idle()                   /* (lcd.c: while the DMA runs) */
+#ifndef FELUCCA_BLE
+#define FELUCCA_BLE 0                           /* the Bluetooth build (tools/build.py FELUCCA_BLE=1, FM-1 only): BLE MIDI,
+                                                 * FM-Link, the SMC-Mixer; firmware/src/ble/ and the bt_*.c files */
+#endif
 #include "platform.c"
+#if FELUCCA_BLE
+#if BOARD_SMK37
+#error "FELUCCA_BLE: the Bluetooth build is the FM-1's (its radio calibration, the gates)"
+#endif
+#ifdef OBV_HOST                                 /* (ble_core.h declares libc.c's, as the firmware has them) */
+#define memset obv_memset
+#define memcpy obv_memcpy
+#define memcmp obv_memcmp
+#endif
+#include "ble/ble_core.h"                       /* the BLE unit's entry points (ble/ble.c, its own object) */
+#ifdef OBV_HOST
+#undef memset
+#undef memcpy
+#undef memcmp
+#endif
+/* BLE MIDI: 2026 DEADACTIVE. The Bluetooth files come in before app_main (they use the panel's state); what the
+ * code before them calls: */
+static uint32_t bt_seq_ticks(uint32_t b);      /* bt_fml.c: the audio ISR, every block: FM-Link's transport, the
+                                                * MIDI clock out, the sequencer's ticks this block */
+static void bt_head_draw(int32_t x, int32_t y);   /* bt_page.c: the header's BT (ui_header) */
+static uint32_t bt_head_icon(void);             /* bt_page.c: 0 none, 1 struck, 2 lit */
+static int32_t bt_head_at;                      /* draw_header: where its tags left room for BT (0: none) */
+static void bt_keys_send(uint32_t st, uint32_t d1, uint32_t d2);   /* bt_midi.c: the keys' MIDI out, to USB and BLE */
+static int bt_rx_get(uint8_t *st, uint8_t *d1, uint8_t *d2);       /* bt_midi.c: the BLE device's MIDI for midi_in */
+static int bt_clock_ok(int ble);                /* bt_set.c: a realtime byte from USB / TRS (0) or BLE (1) followed */
+static uint32_t bt_sync(void);                  /* bt_set.c: SYNC (AUTO, INTERNAL, BLE, LINK) */
+static void bt_sync_set(uint32_t v);
+enum { BT_SYNC_AUTO, BT_SYNC_INT, BT_SYNC_BLE, BT_SYNC_LINK, BT_NSYNC };   /* (bt_set.c bt_sync) */
+static const char *const BT_SYNC_TXT[4] = {" AUTO", " INT", " BLE", " LINK"};
+#define KEYS_SEND bt_keys_send
+#define BT_BSS                                  /* (pattern scratch in .bss: the pool has the BT heap and stacks) */
+#else
+#define KEYS_SEND midi_send
+#define BT_BSS __attribute__((section(".pool")))
+#endif
 #include "obv_dsp.h"
 #include "obv_params.h"
 #include "obv_fx.h"
@@ -98,7 +137,7 @@ static uint32_t seq_trk, seq_cur[NTRK], seq_pg[NTRK], rec, pat_edited, pat_dirty
 static uint32_t rec_down, rec_down_t, beat_seen, beat_t;   /* rec_down: REC held since rec_down_t */
 static uint32_t rec_wait;                       /* a track + 1 that REC waits for: it records from its start on the bar */
 static struct { uint16_t step; uint32_t t; } rec_open[128];   /* a recorded note still held: where and when it began */
-static pattern_t undo_pat __attribute__((section(".pool")));                      /* one level of undo: the pattern before the last pass / erase / clear */
+static pattern_t undo_pat BT_BSS;                      /* one level of undo: the pattern before the last pass / erase / clear */
 static uint32_t undo_ok;
 static uint8_t erase_on[128];                   /* notes erased while their key is held (EDIT + key, playing) */
 static uint32_t erase_pos = 0xFFFFFFFFu;
@@ -725,6 +764,9 @@ static void draw_header(void)
 {
     char tags[40];
     tags[0] = 0;
+#if FELUCCA_BLE
+    bt_head_at = 0;
+#endif
     if (save_armed) {                           /* SAVE armed: the slot it saves into and what is there now */
         patch_t t;
         prog_get(save_to, &t);
@@ -748,6 +790,11 @@ static void draw_header(void)
         uint32_t arp = pv[P_ARP_MODE] != 0, fx = live.v[P_CHO_MIX] || live.v[P_DLY_MIX] || live.v[P_REV_MIX];
         uint32_t n = slen(MODE_S[pv[P_MODE] & 3u]) + 1u + slen(FT_S[pv[P_FTYPE] % NFTYPE])
                    + ((hold >> seq_trk & 1u) ? 5u : 0u) + (ctl_seq_run ? 4u : 0u) + (rec ? 4u : 0u);
+#if FELUCCA_BLE
+        uint32_t bt = bt_head_icon() && n + 3u <= 23u;   /* (Bluetooth on: " BT" with the always-shown tags; ARP and FX
+                                                 * give way to it; all of them on at once: no BT, the page has it) */
+        n += bt ? 3u : 0u;
+#endif
         if (arp && n + 4u <= 23u) n += 4u; else arp = 0;
         if (fx && n + 3u <= 23u) n += 3u; else fx = 0;
         scat(tags, MODE_S[pv[P_MODE] & 3u]);
@@ -758,6 +805,9 @@ static void draw_header(void)
         if (hold >> seq_trk & 1u) scat(tags, " HOLD");
         if (ctl_seq_run) scat(tags, " SEQ");
         if (rec) scat(tags, " REC");
+#if FELUCCA_BLE
+        if (bt) { bt_head_at = 54 + 8 * (int32_t)slen(tags) + 8; scat(tags, "   "); }   /* (ui_header draws it there) */
+#endif
     }
     ui_header(ed_prog(), ed_patch(0)->v + NPARAM, ed_edited(), tags, seq_trk);
 }
@@ -899,7 +949,11 @@ static void draw_page(void)
         }
         {
             static char cpu[24];                /* the GLOBAL page: the render time of an audio half (budget 5800 us), SYNC */
+#if FELUCCA_BLE
+            cpu[0] = 0; fmt_u(cpu, ui_render_us); scat(cpu, "us"); scat(cpu, bt_sync() == BT_SYNC_AUTO && ctl_ext_quarter ? " CLK" : BT_SYNC_TXT[bt_sync() & 3u]);
+#else
             cpu[0] = 0; fmt_u(cpu, ui_render_us); scat(cpu, "us"); scat(cpu, set.sync_int ? " INT" : ctl_ext_quarter ? " CLK" : " AUTO");
+#endif
             ui_page(t, k, save_armed ? "SAVE?" : seq_shown() && pat_edited ? "EDITED" : page == PG_GLOBAL && !layer ? cpu : 0);
         }
     }
@@ -1753,7 +1807,7 @@ static void keys_in(uint32_t notes_only)
                     else { msg[0] = 0; scat(msg, "PATTERN "); fmt_u(msg + slen(msg), set.pat + 1u); say(msg); }
                 } else if (KEY_PAGE[k] >= 0) pat_copy((uint32_t)KEY_PAGE[k]);
             } else {
-                midi_send(0x90u | MIDI_OUT_CH, held_key[k], KEY_VEL(k));
+                KEYS_SEND(0x90u | MIDI_OUT_CH, held_key[k], KEY_VEL(k));
                 note_in(1, held_key[k], KEY_VEL(k));
                 if (notes_shown()) dirty_steps = dirty_page = 1;
                 continue;
@@ -1766,7 +1820,7 @@ static void keys_in(uint32_t notes_only)
             if (key_step[k] == 2u) erase_on[(uint32_t)clampi((int32_t)held_key[k] - pat.trk[seq_trk].transp, 1, 127)] = 0;
             else if (key_step[k] == 1u) seq_key_up(k);
             else if (key_step[k] == 0u) {
-                midi_send(0x80u | MIDI_OUT_CH, held_key[k], 0);
+                KEYS_SEND(0x80u | MIDI_OUT_CH, held_key[k], 0);
                 note_in(0, held_key[k], 0);
                 if (notes_shown()) dirty_steps = dirty_page = 1;
                 continue;
@@ -1782,14 +1836,25 @@ static void midi_in(uint32_t notes_only)
     uint8_t st, d1, d2;
     for (;;) {
         uint32_t ch, kind;
+#if FELUCCA_BLE
+        int ble = 0;                            /* (from the BLE device: its own ring, after USB / TRS) */
+        if (midi_back[3]) { st = midi_back[0]; d1 = midi_back[1]; d2 = midi_back[2]; midi_back[3] = 0; }
+        else if (!midi_get(&st, &d1, &d2) && !(ble = bt_rx_get(&st, &d1, &d2))) break;
+#else
         if (midi_back[3]) { st = midi_back[0]; d1 = midi_back[1]; d2 = midi_back[2]; midi_back[3] = 0; }
         else if (!midi_get(&st, &d1, &d2)) break;
+#endif
         if (notes_only && (st & 0xF0u) == 0xC0u) {   /* a program change loads a sound: not in the middle of a draw */
             midi_back[0] = st; midi_back[1] = d1; midi_back[2] = d2; midi_back[3] = 1;
             break;
         }
         ch = (st & 15u) + 1u; kind = st & 0xF0u;
+#if FELUCCA_BLE
+        if ((st == 0xF8u || st == 0xFAu || st == 0xFBu || st == 0xFCu) && !bt_clock_ok(ble)) continue;   /* (SYNC INTERNAL,
+                                                 * LINK; BLE: the BLE device's only) */
+#else
         if (set.sync_int && (st == 0xF8u || st == 0xFAu || st == 0xFBu || st == 0xFCu)) continue;   /* (SYNC INTERNAL) */
+#endif
         if (st == 0xF8u) {                  /* clock: 24 per quarter. The tempo from 4 quarters (96 clocks) in rendered
                                              * frames, rounded to 48 as our own (quarter_len); taken only when it moves
                                              * by more than 0.3 %: the clock's jitter must not wobble the steps */
@@ -1944,6 +2009,17 @@ static void trk_clear(void)
     m[0] = 0; scat(m, "TRACK "); m[6] = TRK_L[seq_trk % NTRK]; m[7] = 0; scat(m, " CLEARED"); say(m);
     dirty_tags = dirty_steps = dirty_page = 1;
 }
+#if FELUCCA_BLE
+static uint8_t bt_boot_clean;                   /* (bt_page.c AUTOSTART: the start before this one was clean) */
+#include "bt_store.c"                           /* the Bluetooth store: two copies in the sectors after the patterns */
+#include "bt_set.c"                             /* MODE, AUTOSTART, ROLE, RECONNECT, SYNC BLE / LINK */
+#include "smc.c"                                /* the SMC-Mixer DAW layout: faders, knobs, buttons, LEDs, pickup */
+#include "bt_midi.c"                            /* MIDI mode: in (its ring, midi_in) and out (the keys, the clock) */
+#include "bt_fml.c"                             /* FM-Link: two FM-1s in time (fmlink.c, Felucca's) */
+#include "bt_devs.c"                            /* the saved devices: the list, each link's device by pick order */
+#include "bt_page.c"                            /* the Bluetooth page: GLO's fourth, the header's BT */
+#include "core_ble_api.c"                       /* the core functions the BLE unit calls (ble/ble_core.h), bt_service */
+#endif
 static void app_main(void)
 {
     uint32_t k, i, t_led = 0, t_scope = 0, t_page = 0, t_hdr = 0, leds_q = 1;
@@ -1963,7 +2039,7 @@ static void app_main(void)
             }
         set.version = 0;
         if (settings_load(&set, sizeof set) || set.version != SET_VERSION) {
-            static set_v2_t old __attribute__((section(".pool")));
+            static set_v2_t old BT_BSS;
             set_v3_t o3;
             memset(&set, 0, sizeof set);
             set.version = SET_VERSION;
@@ -2022,10 +2098,17 @@ static void app_main(void)
     ui_splash();
     scope_state = 1;
 
+#if FELUCCA_BLE && !defined(OBV_HOST)
+    bt_boot_clean = !(fm1_boot.p3_rst & (4u | 0x40u));   /* (AUTOSTART: no watchdog, no soft reset before this start:
+                                                 * not after a crash's, a Bluetooth fault's restart) */
+#endif
     for (;;) {
         uint32_t rel, b, lit = 0, base = (uint32_t)(KEY0 + 12 * set.oct), np = page;
         int32_t e;
         platform_poll();
+#if FELUCCA_BLE
+        bt_service();                           /* the BT stack's slice and the core's Bluetooth work (core_ble_api.c) */
+#endif
 
         keys_in(0);
 #if BOARD_SMK37
@@ -2056,17 +2139,33 @@ static void app_main(void)
         /* buttons, as sloopDX: tapped = its pages, held = a layer, HOME while held = locked open (any layer button
          * then only lets it go); PLAY, REC, OCT work inside a layer */
         b = fm1_input_edges(&rel);
+#if FELUCCA_BLE
+        b = bt_page_input(b);                   /* (the Bluetooth page open: PRESETS, the knobs and OCT are its) */
+#endif
         if (b & ~(1u << BTN_SAVE)) pat_save_armed = 0;   /* (SAVE PATTERN?: any other button says no) */
         {
             uint32_t mh = is_seq_page(page) && seq_view == SV_STEPS && !layer && (fm1_in.buttons >> BTN_SEL & 1u);
             if (mh != more_held) { more_held = mh; dirty_page = dirty_steps = 1; }   /* (SELECT held in STEPS: STEP+) */
         }
+#if FELUCCA_BLE
+        if (b & (1u << BTN_SEL) && page == PG_GLOBAL && !layer && !bt_page_shown()) {   /* GLOBAL: SELECT pressed = SYNC
+                                                 * AUTO / INTERNAL / BLE / LINK */
+            static const char *const SAY[BT_NSYNC] = {"SYNC AUTO: A MIDI CLOCK LEADS", "SYNC INTERNAL",
+                                                      "SYNC BLE: THE BT DEVICE LEADS", "SYNC LINK: FM-LINK FOLLOWS"};
+            uint32_t v = (bt_sync() + 1u) % BT_NSYNC;
+            bt_sync_set(v); set_dirty = 1; set_t = fm1_ms;
+            if (v != BT_SYNC_AUTO) { ctl_ext_quarter = 0; clk_n = 0; }
+            say(SAY[v]);
+            dirty_page = 1;
+        }
+#else
         if (b & (1u << BTN_SEL) && page == PG_GLOBAL && !layer) {   /* GLOBAL: SELECT pressed = SYNC AUTO / INTERNAL */
             set.sync_int = !set.sync_int; set_dirty = 1; set_t = fm1_ms;
             if (set.sync_int) { ctl_ext_quarter = 0; clk_n = 0; }
             say(set.sync_int ? "SYNC INTERNAL" : "SYNC AUTO: A MIDI CLOCK LEADS");
             dirty_page = 1;
         }
+#endif
         {
             static const uint8_t LB[5] = {BTN_SEQ, BTN_EDIT, BTN_GLO, BTN_SAVE, BTN_FX};
             static const uint8_t LL[5] = {L_SEQ, L_EDIT, L_GLO, L_SAVE, L_FX};
@@ -2092,7 +2191,11 @@ static void app_main(void)
                         } else if (LL[k] == L_EDIT && is_seq_page(page) && SV_ENTRY(seq_view)) seq_clear_cursor();
                         else if (LL[k] == L_EDIT) np = cycle_page(PG_OSC1, 5);
                         else if (LL[k] == L_FX) np = cycle_page(PG_CHORUS, 4);
+#if FELUCCA_BLE
+                        else if (LL[k] == L_GLO) np = bt_glo_tap(page);   /* (then BLUETOOTH, bt_page.c) */
+#else
                         else if (LL[k] == L_GLO) np = page == PG_GLOBAL ? PG_VOICE : page == PG_VOICE ? PG_OUTPUT : PG_GLOBAL;
+#endif
                         else if (is_seq_page(page)) {   /* in the sequencer: SAVE PATTERN? - SAVE again saves (as zp12:
                                                  * now; playing, at the stop), anything else: no */
                             if (pat_save_armed && fm1_ms - pat_save_t < 3000u) { pat_save_armed = 0; pat_save_to(set.pat); }
@@ -2205,6 +2308,9 @@ static void app_main(void)
         }
         if (req_page) { np = req_page - 1u; req_page = 0; if (np == page) dirty_page = dirty_steps = dirty_tags = 1; }
         if (np != page) {
+#if FELUCCA_BLE
+            bt_page_close();                    /* (another page: the Bluetooth page goes) */
+#endif
             if (layer_lock) { layer = L_NONE; layer_lock = 0; }
             if (is_seq_page(np) != is_seq_page(page)) {   /* into / out of the full-screen sequencer: all new */
                 lcd_fill(0, 0, 240, 240, C_PANEL);
@@ -2401,6 +2507,14 @@ static void app_main(void)
         {
         /* the screen: only what changed */
         idle_ok = 1;
+#if FELUCCA_BLE
+        if (bt_page_restore()) {                /* the Bluetooth page closed: everything drawn again */
+            lcd_fill(0, 44, 240, 196, C_PANEL);
+            dirty_hdr = dirty_page = dirty_tags = dirty_steps = 1; scope_state = 1; t_scope = 0; leds_q = hints_key = 0xFFFFFFFFu;
+        }
+        if (bt_page_shown()) bt_page_screen(&t_hdr);   /* (the Bluetooth page: the header and the page under it) */
+        else
+#endif
         if (is_seq_page(page)) {                /* the full-screen sequencer: its own strips */
             static uint32_t top_key, t_seq, info_key;
             static char info_prev[40];

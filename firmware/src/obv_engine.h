@@ -752,7 +752,11 @@ static void engine_audio(int32_t *out, uint32_t n)
         eng_t += CTL;
         if (ctl_arp_restart) { ctl_arp_restart = 0; for (p = 0; p < NPART; p++) { arp[p].pos = 0; arp[p].cnt = 0xFFFFFFFFu; } }
         for (p = 0; p < NPART; p++) arp_tick(p);
+#if FELUCCA_BLE
+        { uint32_t k, nt = bt_seq_ticks(b); for (k = 0; k < nt; k++) seq_tick(); }   /* (FM-Link: 0..2 ticks a block) */
+#else
         seq_tick();                             /* (may swap the pattern in) */
+#endif
         for (p = 0; p < NPART; p++) { lfo_tick(&pt[p]); block_globals(&pt[p]); }
         for (v = 0; v < NV; v++) {
             if (vc[v].ae.stage == E_IDLE && !vc[v].gate) {

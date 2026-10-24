@@ -130,9 +130,24 @@ static volatile uint32_t fm1_ms;                /* milliseconds since power-on (
 #define SLOTS_AT 0x00099000u                    /* (3.0) the patterns of four tracks: NBLOB slots of SLOT_SECT sectors, after the
                                                  * programs in FL_DATA (0x99000..0xB8FFF) */
 #define SLOT_SECT 4u
+#if FELUCCA_BLE
+/* the Bluetooth build (BLE MIDI: 2026 DEADACTIVE): its store (bt_store.c, two copies) in the two sectors after the
+ * pattern slots, and no more writes to 1.3-1.5's pattern sectors (0xF4000.., read only since 3.0): they lie in the
+ * stock config store's range (0xE5000..0xFBFFF), where the radio calibration the Bluetooth start needs is kept */
+#define BTS_AT 0x000B9000u
+#define BTS_SECT 2u
+#define FL_RANGE_OK(off, n) (FL_IN(off, n, FL_OTA_LO, FL_OTA_HI) || FL_IN(off, n, SETTINGS_AT, SETTINGS_AT + 0x1000u) || \
+                             FL_IN(off, n, PSECT_AT, PSECT_AT + NPSECT * 0x1000u) || \
+                             FL_IN(off, n, SLOTS_AT, SLOTS_AT + NBLOB * SLOT_SECT * 0x1000u) || \
+                             FL_IN(off, n, BTS_AT, BTS_AT + BTS_SECT * 0x1000u))
+_Static_assert(BTS_AT >= SLOTS_AT + NBLOB * SLOT_SECT * 0x1000u && BTS_AT + BTS_SECT * 0x1000u <= 0xE0000u,
+               "the Bluetooth store: after the pattern slots, below the update's staging (FL_OTA)");
+_Static_assert(BTS_AT + BTS_SECT * 0x1000u <= 0xE5000u, "the Bluetooth store: outside the stock config store");
+#else
 #define FL_RANGE_OK(off, n) (FL_IN(off, n, FL_OTA_LO, FL_OTA_HI) || FL_IN(off, n, SETTINGS_AT, SETTINGS_AT + 0x1000u) || \
                              FL_IN(off, n, BLOBS_AT, BLOBS_AT + NBLOB * 0x1000u) || FL_IN(off, n, PSECT_AT, PSECT_AT + NPSECT * 0x1000u) || \
                              FL_IN(off, n, SLOTS_AT, SLOTS_AT + NBLOB * SLOT_SECT * 0x1000u))
+#endif
 #endif
 #include "fm1_flash.h"
 static uint8_t flash_ok;
@@ -412,16 +427,36 @@ static int32_t abuf[2u * HALF_WORDS] __attribute__((aligned(4)));
 static volatile int32_t master_q12 = 2048;
 static void app_audio(int32_t *out, uint32_t n);
 static void app_main(void);
+#if FELUCCA_BLE
+/* the Bluetooth build: the half interrupts' timing (the BT libraries hold the interrupts off up to ~12 ms, measured
+ * on Felucca; a half is 5.8 ms): the entry tick (FM-Link: when a block is heard), the longest gap between two halves
+ * (ticks; core_ble_api.c core_audio_gap_us reads and clears it, the Bluetooth page its own), the halves the DMA moved
+ * on from while they were rendered */
+static volatile uint32_t audio_t0, audio_gap_max, audio_gap_page, audio_late;
+#endif
 
 void fm1_alnk0_irq(void)                       /* via isr_alnk0 (hal/fm1_isr.S) */
 {
     uint8_t p;
     in_audio = 1;
     p = fm1_audio_pending();
+#if FELUCCA_BLE
+    if (p & FM1_AUDIO_HALF) {
+        uint32_t t0 = fm1_ticks(), g = t0 - audio_t0;
+        audio_t0 = t0;
+        if (g > audio_gap_max)
+            audio_gap_max = g;
+        if (g > audio_gap_page)
+            audio_gap_page = g;
+    }
+#endif
     fm1_audio_ack_aux(p);
     if (p & FM1_AUDIO_HALF) {
         int32_t *o = &abuf[fm1_audio_free_half() * HALF_WORDS];
         uint32_t i, b;
+#if FELUCCA_BLE
+        uint32_t half = fm1_audio_free_half();
+#endif
         for (i = 0; i < HALF_WORDS; i++)
             o[i] = 0;
         UAC_ONLY(uac_render_start());
@@ -435,6 +470,10 @@ void fm1_alnk0_irq(void)                       /* via isr_alnk0 (hal/fm1_isr.S) 
         for (i = 0; i < HALF_WORDS; i++)
             o[i] <<= 7;
         fm1_audio_ack_half();
+#if FELUCCA_BLE
+        if (fm1_audio_free_half() != half)
+            audio_late++;                       /* the DMA moved on while we rendered */
+#endif
     }
     in_audio = 0;
 }

@@ -165,6 +165,10 @@ static void ui_header(uint32_t prog, const uint8_t *name, uint32_t edited, const
     cv_text(54, 4, &FONT_S, tl, c);
     cv_text(66, 4, &FONT_S, n, trk ? c : C_CREAM);
     cv_text(54, 22, &FONT_S, tags, C_DIMT);
+#if FELUCCA_BLE
+    if (bt_head_at)
+        bt_head_draw(bt_head_at, 22);           /* (Bluetooth: the tags' BT, lit / struck: bt_page.c) */
+#endif
     draw_logo_small(240 - 4 - text_w(&FONT_S, "OBERVAVE"), 4);
     cv_rect(0, 42, 240, 1, C_RULE);
     cv_blit(0, 0);
