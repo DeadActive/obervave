@@ -1,0 +1,6 @@
+# The Bluetooth build's base (FELUCCA_BLE=1, tools/build.py; BLE MIDI: 2026 DEADACTIVE).
+# UPSTREAM: the upstream release whose update path this tree carries unchanged (gate 2a, tools/check_update_path.py).
+# LOADER_SHA256: that release's update loader, build/loader/ota.bin (gate 1): a Bluetooth build stops on any other.
+# After merging a later upstream release: name its tag and its loader's hash here.
+UPSTREAM v3.0.1
+LOADER_SHA256 919a49cdef598d56862b9a3bff999c7bb48f6ebdef21deece02edcc4cff1061d
