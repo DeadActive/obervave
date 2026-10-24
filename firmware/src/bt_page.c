@@ -47,7 +47,7 @@ static struct {
     uint32_t add_t0;                                /* .. its scan's start (BT_ADD_MS: then it stays) */
     uint32_t sig, t_draw;                           /* what was drawn, when */
     ble_ui_dev_t adev[BT_SHOW];                     /* the ADD list as drawn: a pick takes these */
-} btp;
+} btp __attribute__((section(".pool")));            /* (as Felucca's: the RAM region keeps its 4 KB spare) */
 
 /* the header's BT, a tag after the others (obervave.c draw_header, obv_ui.h ui_header; Felucca's top-bar icon, design
  * 5.6): 0 none (Bluetooth off), 1 struck (on, nothing linked: searching, reconnecting, the device role waiting), 2 lit
