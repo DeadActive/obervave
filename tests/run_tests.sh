@@ -70,5 +70,35 @@ fi
 
 run "installer (tools/fm1_install.py): FM-1 and SMK-37, install and the update-mode resume check the model" python3 tests/install_test.py
 
+# the Bluetooth build (BLE MIDI: 2026 DEADACTIVE; FELUCCA_BLE=1, Felucca's ble-kit): the BLE unit's own tests
+# (tests/ble/, unchanged), FM-Link's engine, the gates' tools, and the core's side on OberVave's host (tests/bt_*:
+# obervave.c with OBV_HOST and FELUCCA_BLE=1, tests/bt_host.h standing in for the BLE unit)
+for t in ble_midi ble_scan ble_central ble_vm ble_gatt; do $CC -o "$OUT/${t}_test" "tests/ble/${t}_test.c"; done
+$CC -Wno-deprecated-declarations -Ifirmware/src/ble -o "$OUT/ble_os_test" tests/ble/ble_os_test.c
+run "BLE-MIDI parser and packer" "$OUT/ble_midi_test"
+run "BLE scan table" "$OUT/ble_scan_test"
+run "BLE central state machine, reconnecting, UUID match, monitor text" "$OUT/ble_central_test"
+run "BLE stored RF calibration (config store)" "$OUT/ble_vm_test"
+run "BLE device role: the GATT table (BLE-MIDI service, characteristic, CCCD), advertising data, scan response" "$OUT/ble_gatt_test"
+run "BLE OS layer (host back end)" "$OUT/ble_os_test"
+run "BLE fault path: records and reboots, never waits on interrupts" python3 tests/ble/check_ble_fatal.py
+$CC -o "$OUT/fmlink_test" tests/fmlink_test.c
+run "FM-Link: two FM-1s over a simulated Bluetooth link (bursts, delays, loss, crystals apart): start, 3 min, BPM, join, STOP" "$OUT/fmlink_test"
+run "gate 2 tool self-test (the update path: sources, platform.c's plain view, machine code, plain vs Bluetooth compile)" python3 tools/check_update_path.py --selftest
+run "gate 3 tool self-test (BT start-up reachable at boot)" python3 tools/check_ble_boot.py --selftest
+run "the Bluetooth build's memory: the controller's data in the RAM region, the heap in the pool, one core (SLOOP's moves refused)" python3 tests/ble_layout_test.py
+BT="-w -DOBV_HOST -DFELUCCA_BLE=1 -Ifirmware/src -Ifirmware/gen"
+for t in bt_devs bt_midi bt_fml smc bt_page; do $CC $BT -o "$OUT/${t}_test" "tests/${t}_test.c"; done
+run "Bluetooth store and saved devices: two copies, OberVave's settings untouched, pick order, full list, each link's device, the 30 s grace, the address, the RF copy" "$OUT/bt_devs_test"
+run "Bluetooth MIDI: MIDI mode in (its own ring into midi_in) and out, SYNC AUTO / INT / BLE / LINK, the release on a lost link, the clock out" "$OUT/bt_midi_test"
+run "FM-Link's glue through OberVave's sequencer: INTERNAL / AUTO lead, LINK follows; PLAY, STOP, tempo, its own PLAY held, no link" "$OUT/bt_fml_test"
+run "SMC-Mixer DAW layout on OberVave's mixer: faders with pickup, PAN and PERFORM knobs, MUTE SOLO REC SELECT, the transport, the LEDs" "$OUT/smc_test"
+run "Bluetooth page (GLO's fourth): rows, ON / AUTOSTART / ROLE / MODE / RECONNECT, ADD, use, FORGET, the header's BT; its screens" "$OUT/bt_page_test" "$OUT"
+cc -O2 -Wall -Wno-unused-function -DOBV_HOST -DAPP_VER='"dev"' -Ifirmware/src -Ifirmware/gen -o "$OUT/obervave_plainhost" firmware/src/obervave.c
+cc -O2 -Wall -Wno-unused-function -DOBV_HOST -DFELUCCA_BLE=1 -DAPP_VER='"dev"' -Ifirmware/src -Ifirmware/gen -o "$OUT/obervave_blehost" firmware/src/obervave.c
+"$OUT/obervave_plainhost" "$OUT/cmp_plain" >/dev/null && "$OUT/obervave_blehost" "$OUT/cmp_ble" >/dev/null
+run "the Bluetooth build with Bluetooth off sounds and draws as the plain build (default script: WAV, screens)" \
+    sh -c "cmp '$OUT/cmp_plain.wav' '$OUT/cmp_ble.wav' && cmp '$OUT/cmp_plain-1000.ppm' '$OUT/cmp_ble-1000.ppm' && cmp '$OUT/cmp_plain-3000.ppm' '$OUT/cmp_ble-3000.ppm'"
+
 [ "$fail" = 0 ] && echo "ALL TESTS PASSED" || echo "SOME TESTS FAILED"
 exit "$fail"

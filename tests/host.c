@@ -209,6 +209,9 @@ static int psect_save(uint32_t i, const void *p, uint32_t n)
     return 0;
 }
 
+#if FELUCCA_BLE
+#include "bt_host.h"                            /* (the Bluetooth build: the BLE unit's and the platform's stand-ins) */
+#endif
 static uint8_t mq[64][3];
 static uint32_t mq_w, mq_r;
 static int midi_get(uint8_t *st, uint8_t *d1, uint8_t *d2)
